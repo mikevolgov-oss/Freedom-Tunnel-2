@@ -402,7 +402,7 @@ fun FreedomTunnelScreen(
                     onClick = {
                         message = "VPN-движок ещё не подключён"
                     },
-                    enabled = false,
+                    enabled =true ,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp),
