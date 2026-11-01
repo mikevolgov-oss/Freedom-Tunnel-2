@@ -148,9 +148,9 @@ class FreedomVpnService : VpnService() {
 
             if (Build.VERSION.SDK_INT >= 33) {
                 val routes4 = options.inet4RouteAddress
-                while (routes4.hasNext()) builder.addRoute(routes4.next().toIpPrefixCompat())
+                while (routes4.hasNext()) { val route = routes4.next(); builder.addRoute(route.address(), route.prefix()) }
                 val routes6 = options.inet6RouteAddress
-                while (routes6.hasNext()) builder.addRoute(routes6.next().toIpPrefixCompat())
+                while (routes6.hasNext()) { val route = routes6.next(); builder.addRoute(route.address(), route.prefix()) }
             } else {
                 val routes4 = options.inet4RouteRange
                 while (routes4.hasNext()) {
@@ -230,5 +230,4 @@ class FreedomVpnService : VpnService() {
         else -> null
     }
 
-    private fun android.net.IpPrefix.toIpPrefixCompat(): String = toString()
 }
