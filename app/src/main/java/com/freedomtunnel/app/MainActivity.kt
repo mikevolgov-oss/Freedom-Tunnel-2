@@ -2,6 +2,10 @@
 package com.freedomtunnel.app
 
 import android.net.Uri
+import android.net.VpnService
+import android.content.Intent
+import android.app.Activity
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -32,10 +36,35 @@ data class VlessServer(
     val port: String,
     val uuid: String,
     val security: String,
-    val network: String
+    val network: String,
+    val rawLink: String
 )
 
 class MainActivity : ComponentActivity() {
+    private var pendingVpnConfig: String = ""
+    private val vpnRequestCode = 410
+    private fun requestVpn(config: String) {
+        pendingVpnConfig = config
+        val permissionIntent = VpnService.prepare(this)
+        if (permissionIntent != null) {
+            @Suppress("DEPRECATION")
+            startActivityForResult(permissionIntent, vpnRequestCode)
+        } else startVpnService()
+    }
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == vpnRequestCode && resultCode == Activity.RESULT_OK) startVpnService()
+    }
+    private fun startVpnService() {
+        val intent = Intent(this, FreedomVpnService::class.java)
+            .setAction(FreedomVpnService.ACTION_START)
+            .putExtra(FreedomVpnService.EXTRA_CONFIG, pendingVpnConfig)
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
+    }
+    private fun stopVpnService() {
+        stopService(Intent(this, FreedomVpnService::class.java))
+    }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -43,6 +72,11 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             FreedomTunnelScreen(
+                onConnect = { link ->
+                    try { requestVpn(VlessConfig.fromLink(link)) }
+                    catch (e: Exception) { android.widget.Toast.makeText(this, e.message ?: "Ошибка конфигурации", android.widget.Toast.LENGTH_LONG).show() }
+                },
+                onDisconnect = { stopVpnService() },
                 savedServer = prefs.getString("server", "") ?: "",
                 savedPort = prefs.getString("port", "443") ?: "443",
                 savedUuid = prefs.getString("uuid", "") ?: "",
@@ -60,6 +94,8 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun FreedomTunnelScreen(
+    onConnect: (String) -> Unit,
+    onDisconnect: () -> Unit,
     savedServer: String,
     savedPort: String,
     savedUuid: String,
@@ -74,6 +110,7 @@ fun FreedomTunnelScreen(
     }
 
     var servers by remember { mutableStateOf(listOf<VlessServer>()) }
+    var selectedLink by remember { mutableStateOf("") }
     var message by remember { mutableStateOf("Загрузите список серверов") }
     var loading by remember { mutableStateOf(false) }
 
@@ -213,7 +250,8 @@ fun FreedomTunnelScreen(
                                                 ) ?: "none",
                                                 network = uri.getQueryParameter(
                                                     "type"
-                                                ) ?: "tcp"
+                                                ) ?: "tcp",
+                                                rawLink = link
                                             )
                                         } catch (e: Exception) {
                                             null
@@ -308,6 +346,7 @@ fun FreedomTunnelScreen(
                                         server = item.host
                                         port = item.port
                                         uuid = item.uuid
+                                        selectedLink = item.rawLink
                                         message = "Сервер выбран: ${item.name}"
                                     },
                                     modifier = Modifier.fillMaxWidth()
@@ -400,9 +439,13 @@ fun FreedomTunnelScreen(
 
                 Button(
                     onClick = {
-                        message = "VPN-движок ещё не подключён"
+                        if (selectedLink.isBlank()) message = "Сначала выберите сервер из списка"
+                        else {
+                            onConnect(selectedLink)
+                            message = "Запрашиваем разрешение Android и запускаем VPN..."
+                        }
                     },
-                    enabled =true ,
+                    enabled = selectedLink.isNotBlank(),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(52.dp),
@@ -410,6 +453,14 @@ fun FreedomTunnelScreen(
                 ) {
                     Text("ПОДКЛЮЧИТЬСЯ")
                 }
+
+                OutlinedButton(
+                    onClick = {
+                        onDisconnect()
+                        message = "VPN остановлен"
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("ОТКЛЮЧИТЬСЯ") }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
