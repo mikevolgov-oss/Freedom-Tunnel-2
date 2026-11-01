@@ -65,9 +65,9 @@ class FreedomVpnService : VpnService() {
             workingPath = working.absolutePath
             tempPath = cacheDir.absolutePath
             logMaxLines = 1000
-            debug = BuildConfig.DEBUG
-            appVersion = BuildConfig.VERSION_CODE.toString()
-            appMarketingVersion = BuildConfig.VERSION_NAME
+            debug = false
+            appVersion = "1"
+            appMarketingVersion = "0.1.0"
         }
         Libbox.setup(setup)
 
@@ -122,7 +122,7 @@ class FreedomVpnService : VpnService() {
         server.start()
         server.startOrReloadService(
             config,
-            OverrideOptions().apply { autoRoute = true }
+            OverrideOptions()
         )
         Log.i(TAG, "sing-box service started")
     }
