@@ -37,6 +37,9 @@ android {
 }
 
 dependencies {
+    // sing-box VPN engine (GPL-3.0-or-later)
+    implementation("com.github.singbox-android:libbox:1.14.4")
+
     implementation(platform("androidx.compose:compose-bom:2025.01.00"))
     implementation("androidx.activity:activity-compose:1.10.0")
     implementation("androidx.compose.ui:ui")
