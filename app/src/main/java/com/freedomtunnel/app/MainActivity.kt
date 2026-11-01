@@ -28,6 +28,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.Socket
+import java.net.InetSocketAddress
 import java.util.concurrent.Executors
 
 data class VlessServer(
@@ -111,6 +113,8 @@ fun FreedomTunnelScreen(
 
     var servers by remember { mutableStateOf(listOf<VlessServer>()) }
     var selectedLink by remember { mutableStateOf("") }
+    var pingResults by remember { mutableStateOf(mapOf<String, String>()) }
+    var pinging by remember { mutableStateOf(setOf<String>()) }
     var message by remember { mutableStateOf("Загрузите список серверов") }
     var loading by remember { mutableStateOf(false) }
 
@@ -338,8 +342,35 @@ fun FreedomTunnelScreen(
                                     color = Color.LightGray,
                                     fontSize = 12.sp
                                 )
-
+                                val pingKey = "${item.host}:${item.port}"
+                                Text(
+                                    "TCP-пинг: ${pingResults[pingKey] ?: "не проверен"}",
+                                    color = Color(0xFF9FB3C8),
+                                    fontSize = 12.sp
+                                )
                                 Spacer(modifier = Modifier.height(8.dp))
+                                OutlinedButton(
+                                    onClick = {
+                                        if (pingKey !in pinging) {
+                                            pinging = pinging + pingKey
+                                            executor.execute {
+                                                val started = System.nanoTime()
+                                                val result = try {
+                                                    Socket().use { socket ->
+                                                        socket.connect(InetSocketAddress(item.host, item.port.toInt()), 5000)
+                                                    }
+                                                    "${(System.nanoTime() - started) / 1_000_000} мс"
+                                                } catch (_: Exception) { "нет ответа" }
+                                                handler.post {
+                                                    pingResults = pingResults + (pingKey to result)
+                                                    pinging = pinging - pingKey
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = pingKey !in pinging,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text(if (pingKey in pinging) "ПРОВЕРЯЕМ..." else "ПРОВЕРИТЬ TCP-ПИНГ") }
 
                                 Button(
                                     onClick = {
