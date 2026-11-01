@@ -1,3 +1,4 @@
+
 package com.freedomtunnel.app
 
 import android.os.Bundle
@@ -5,37 +6,56 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val prefs = getSharedPreferences("freedom_tunnel_config", MODE_PRIVATE)
+
         setContent {
-            FreedomTunnelScreen()
+            FreedomTunnelScreen(
+                savedServer = prefs.getString("server", "") ?: "",
+                savedPort = prefs.getString("port", "443") ?: "443",
+                savedUuid = prefs.getString("uuid", "") ?: "",
+                onSave = { server, port, uuid ->
+                    prefs.edit()
+                        .putString("server", server)
+                        .putString("port", port)
+                        .putString("uuid", uuid)
+                        .apply()
+                }
+            )
         }
     }
 }
 
 @Composable
-fun FreedomTunnelScreen() {
+fun FreedomTunnelScreen(
+    savedServer: String,
+    savedPort: String,
+    savedUuid: String,
+    onSave: (String, String, String) -> Unit
+) {
+    var server by remember { mutableStateOf(savedServer) }
+    var port by remember { mutableStateOf(savedPort) }
+    var uuid by remember { mutableStateOf(savedUuid) }
+    var message by remember { mutableStateOf("Заполните параметры сервера") }
+
     val background = Color(0xFF0B1220)
     val green = Color(0xFF56D6A0)
 
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            primary = green,
-            background = background,
-            surface = Color(0xFF172235)
-        )
-    ) {
+    MaterialTheme(colorScheme = darkColorScheme(primary = green)) {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = background
@@ -43,12 +63,13 @@ fun FreedomTunnelScreen() {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+                    .padding(22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                Spacer(modifier = Modifier.height(28.dp))
+
                 Text(
-                    text = "FREEDOM",
+                    "FREEDOM",
                     color = Color.White,
                     fontSize = 32.sp,
                     fontWeight = FontWeight.Black,
@@ -56,55 +77,128 @@ fun FreedomTunnelScreen() {
                 )
 
                 Text(
-                    text = "TUNNEL",
+                    "TUNNEL",
                     color = green,
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = 7.sp
                 )
 
-                Spacer(modifier = Modifier.height(42.dp))
+                Spacer(modifier = Modifier.height(28.dp))
 
                 Text(
-                    text = "Добро пожаловать!",
+                    "Настройка подключения",
                     color = Color.White,
-                    fontSize = 22.sp,
+                    fontSize = 21.sp,
                     fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                OutlinedTextField(
+                    value = server,
+                    onValueChange = { server = it },
+                    label = { Text("Адрес сервера") },
+                    placeholder = { Text("example.com или IP") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                Text(
-                    text = "Основа приложения создана. Следующий этап — настройка защищённого подключения.",
-                    color = Color(0xFFB8C4D6),
-                    fontSize = 15.sp,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 23.sp
+                OutlinedTextField(
+                    value = port,
+                    onValueChange = { port = it.filter(Char::isDigit).take(5) },
+                    label = { Text("Порт") },
+                    placeholder = { Text("443") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number
+                    ),
+                    modifier = Modifier.fillMaxWidth()
                 )
 
-                Spacer(modifier = Modifier.height(32.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                OutlinedTextField(
+                    value = uuid,
+                    onValueChange = { uuid = it },
+                    label = { Text("UUID") },
+                    placeholder = {
+                        Text("xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
+                    },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
 
                 Button(
-                    onClick = {},
-                    enabled = false,
+                    onClick = {
+                        val validPort = port.toIntOrNull()
+                        val validUuid = Regex(
+                            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+                        ).matches(uuid.trim())
+
+                        when {
+                            server.isBlank() ->
+                                message = "Введите адрес сервера"
+
+                            validPort == null || validPort !in 1..65535 ->
+                                message = "Проверьте номер порта"
+
+                            !validUuid ->
+                                message = "Проверьте UUID"
+
+                            else -> {
+                                onSave(server.trim(), port, uuid.trim())
+                                message = "Настройки сохранены"
+                            }
+                        }
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(16.dp)
+                        .height(54.dp),
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Text(
-                        text = "ПОДКЛЮЧИТЬСЯ",
+                        "СОХРАНИТЬ НАСТРОЙКИ",
                         fontWeight = FontWeight.Bold
                     )
                 }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Button(
+                    onClick = {
+                        message = "VPN-движок ещё не подключён"
+                    },
+                    enabled = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = RoundedCornerShape(14.dp)
+                ) {
+                    Text("ПОДКЛЮЧИТЬСЯ")
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
 
                 Text(
-                    text = "Статус: ожидает настройки",
+                    message,
                     color = Color(0xFFFFC66D),
-                    fontSize = 13.sp
+                    fontSize = 14.sp
                 )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Text(
+                    "FREEDOM TUNNEL • версия 0.2",
+                    color = Color(0xFF718096),
+                    fontSize = 11.sp
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }
