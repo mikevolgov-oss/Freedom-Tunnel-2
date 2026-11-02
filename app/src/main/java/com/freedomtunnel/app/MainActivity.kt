@@ -7,6 +7,9 @@ import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.app.Activity
 import android.os.Build
 import android.os.Bundle
@@ -47,6 +50,12 @@ data class VlessServer(
 
 class MainActivity : ComponentActivity() {
     private var pendingVpnConfig: String = ""
+    private val vpnStatus = mutableStateOf("")
+    private val statusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            vpnStatus.value = intent?.getStringExtra(FreedomVpnService.EXTRA_STATUS).orEmpty()
+        }
+    }
     private val vpnRequestCode = 410
     private val vpnStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -94,16 +103,34 @@ class MainActivity : ComponentActivity() {
     private fun stopVpnService() {
         stopService(Intent(this, FreedomVpnService::class.java))
     }
+    override fun onDestroy() {
+        runCatching { unregisterReceiver(statusReceiver) }
+        super.onDestroy()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        val statusFilter = IntentFilter(FreedomVpnService.ACTION_STATUS)
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(statusReceiver, statusFilter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(statusReceiver, statusFilter)
+        }
 
         val prefs = getSharedPreferences("freedom_tunnel_config", MODE_PRIVATE)
 
         setContent {
             FreedomTunnelScreen(
+                serviceStatus = vpnStatus.value,
                 onConnect = { link ->
-                    try { requestVpn(VlessConfig.fromLink(link)) }
-                    catch (e: Exception) { android.widget.Toast.makeText(this, e.message ?: "Ошибка конфигурации", android.widget.Toast.LENGTH_LONG).show() }
+                    try {
+                        vpnStatus.value = "Запрашиваем разрешение Android и запускаем VPN..."
+                        requestVpn(VlessConfig.fromLink(link))
+                    } catch (e: Exception) {
+                        vpnStatus.value = "Ошибка конфигурации: ${e.message ?: e.javaClass.simpleName}"
+                    }
                 },
                 onDisconnect = { stopVpnService() },
                 savedServer = prefs.getString("server", "") ?: "",
@@ -123,6 +150,7 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun FreedomTunnelScreen(
+    serviceStatus: String,
     onConnect: (String) -> Unit,
     onDisconnect: () -> Unit,
     savedServer: String,
@@ -355,7 +383,7 @@ fun FreedomTunnelScreen(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    message,
+                    serviceStatus.ifBlank { message },
                     color = Color(0xFFFFC66D),
                     fontSize = 14.sp
                 )
