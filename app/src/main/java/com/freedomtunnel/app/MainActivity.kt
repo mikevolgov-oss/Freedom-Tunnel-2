@@ -7,9 +7,6 @@ import android.content.Intent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.IntentFilter
 import android.app.Activity
 import android.os.Build
 import android.os.Bundle
@@ -51,11 +48,6 @@ data class VlessServer(
 class MainActivity : ComponentActivity() {
     private var pendingVpnConfig: String = ""
     private val vpnStatus = mutableStateOf("")
-    private val statusReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: Intent?) {
-            vpnStatus.value = intent?.getStringExtra(FreedomVpnService.EXTRA_STATUS).orEmpty()
-        }
-    }
     private val vpnRequestCode = 410
     private val vpnStatusReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -104,20 +96,11 @@ class MainActivity : ComponentActivity() {
         stopService(Intent(this, FreedomVpnService::class.java))
     }
     override fun onDestroy() {
-        runCatching { unregisterReceiver(statusReceiver) }
         super.onDestroy()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        val statusFilter = IntentFilter(FreedomVpnService.ACTION_STATUS)
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(statusReceiver, statusFilter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            @Suppress("DEPRECATION")
-            registerReceiver(statusReceiver, statusFilter)
-        }
 
         val prefs = getSharedPreferences("freedom_tunnel_config", MODE_PRIVATE)
 
@@ -398,7 +381,20 @@ fun FreedomTunnelScreen(
                         fontWeight = FontWeight.Bold
                     )
 
-                    servers.forEachIndexed { index, item ->
+                    val sortedServers = servers.sortedWith(
+                        compareBy<VlessServer> { item ->
+                            val value = pingResults["${item.host}:${item.port}"]
+                            when {
+                                value == null -> 2
+                                value.endsWith("мс") -> 0
+                                else -> 1
+                            }
+                        }.thenBy { item ->
+                            pingResults["${item.host}:${item.port}"]
+                                ?.substringBefore(" ")?.toLongOrNull() ?: Long.MAX_VALUE
+                        }
+                    )
+                    sortedServers.forEachIndexed { index, item ->
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
