@@ -22,6 +22,8 @@ class FreedomVpnService : VpnService() {
         const val ACTION_START = "com.freedomtunnel.app.START"
         const val ACTION_STOP = "com.freedomtunnel.app.STOP"
         const val EXTRA_CONFIG = "config"
+        const val ACTION_STATUS = "com.freedomtunnel.app.VPN_STATUS"
+        const val EXTRA_STATUS = "status"
         private const val CHANNEL_ID = "freedom_vpn"
         private const val NOTIFICATION_ID = 41
         private const val TAG = "FreedomVpnService"
@@ -37,20 +39,24 @@ class FreedomVpnService : VpnService() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
+            publishStatus("VPN остановлен")
             stopTunnel()
             return START_NOT_STICKY
         }
         val config = intent?.getStringExtra(EXTRA_CONFIG)
         if (config.isNullOrBlank()) {
+            publishStatus("Ошибка: конфигурация VPN пустая")
             stopSelf()
             return START_NOT_STICKY
         }
         startInForeground()
+        publishStatus("Сервис VPN запущен, поднимаем туннель...")
         Thread {
             try {
                 startTunnel(config)
             } catch (e: Exception) {
                 Log.e(TAG, "Unable to start sing-box", e)
+                publishStatus("Ошибка запуска VPN: ${e.javaClass.simpleName}: ${e.message ?: "без подробностей"}")
                 stopTunnel()
             }
         }.start()
@@ -125,6 +131,7 @@ class FreedomVpnService : VpnService() {
             OverrideOptions()
         )
         Log.i(TAG, "sing-box service started")
+        publishStatus("Команда sing-box принята. Проверяем подключение...")
     }
 
     private fun establishTun(options: TunOptions): Int {
@@ -168,6 +175,11 @@ class FreedomVpnService : VpnService() {
             ?: error("Android не выдал VPN-интерфейс")
         tunFd = descriptor
         return descriptor.fd
+    }
+
+    private fun publishStatus(message: String) {
+        Log.i(TAG, message)
+        sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_STATUS, message))
     }
 
     private fun createNotificationChannel() {
