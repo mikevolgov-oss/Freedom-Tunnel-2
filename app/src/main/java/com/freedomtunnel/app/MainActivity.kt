@@ -4,6 +4,9 @@ package com.freedomtunnel.app
 import android.net.Uri
 import android.net.VpnService
 import android.content.Intent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
 import android.app.Activity
 import android.os.Build
 import android.os.Bundle
@@ -45,6 +48,30 @@ data class VlessServer(
 class MainActivity : ComponentActivity() {
     private var pendingVpnConfig: String = ""
     private val vpnRequestCode = 410
+    private val vpnStatusReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val text = intent?.getStringExtra(FreedomVpnService.EXTRA_STATUS) ?: return
+            runOnUiThread {
+                android.widget.Toast.makeText(this@MainActivity, text, android.widget.Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val filter = IntentFilter(FreedomVpnService.ACTION_STATUS)
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(vpnStatusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(vpnStatusReceiver, filter)
+        }
+    }
+
+    override fun onStop() {
+        runCatching { unregisterReceiver(vpnStatusReceiver) }
+        super.onStop()
+    }
     private fun requestVpn(config: String) {
         pendingVpnConfig = config
         val permissionIntent = VpnService.prepare(this)
