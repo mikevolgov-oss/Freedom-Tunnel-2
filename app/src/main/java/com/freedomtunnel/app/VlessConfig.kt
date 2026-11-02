@@ -87,7 +87,8 @@ object VlessConfig {
         return JSONObject()
             .put("log", JSONObject().put("level", "info").put("timestamp", true))
             .put("dns", JSONObject().put("servers", JSONArray().put(
-                JSONObject().put("tag", "dns-remote").put("address", "1.1.1.1").put("detour", "proxy")
+                JSONObject().put("type", "udp").put("tag", "dns-remote")
+                    .put("server", "1.1.1.1").put("detour", "proxy")
             )).put("final", "dns-remote"))
             .put("inbounds", inbounds)
             .put("outbounds", outbounds)
