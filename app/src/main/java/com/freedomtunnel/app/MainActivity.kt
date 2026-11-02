@@ -125,15 +125,45 @@ fun FreedomTunnelScreen(
     val background = Color(0xFF0B1220)
 
     MaterialTheme(colorScheme = darkColorScheme(primary = green)) {
-        Surface(
+        Scaffold(
             modifier = Modifier.fillMaxSize(),
-            color = background
-        ) {
+            containerColor = background,
+            bottomBar = {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                ) {
+                    Button(
+                        onClick = {
+                            if (selectedLink.isBlank()) message = "Сначала выберите сервер из списка"
+                            else {
+                                onConnect(selectedLink)
+                                message = "Запрашиваем разрешение Android и запускаем VPN..."
+                            }
+                        },
+                        enabled = selectedLink.isNotBlank(),
+                        modifier = Modifier.fillMaxWidth().height(52.dp),
+                        shape = RoundedCornerShape(14.dp)
+                    ) { Text("ПОДКЛЮЧИТЬСЯ") }
+
+                    OutlinedButton(
+                        onClick = {
+                            onDisconnect()
+                            message = "VPN остановлен"
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text("ОТКЛЮЧИТЬСЯ") }
+                }
+            }
+        ) { contentPadding ->
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(20.dp),
+                    .padding(contentPadding)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(modifier = Modifier.height(20.dp))
@@ -467,31 +497,6 @@ fun FreedomTunnelScreen(
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-
-                Button(
-                    onClick = {
-                        if (selectedLink.isBlank()) message = "Сначала выберите сервер из списка"
-                        else {
-                            onConnect(selectedLink)
-                            message = "Запрашиваем разрешение Android и запускаем VPN..."
-                        }
-                    },
-                    enabled = selectedLink.isNotBlank(),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("ПОДКЛЮЧИТЬСЯ")
-                }
-
-                OutlinedButton(
-                    onClick = {
-                        onDisconnect()
-                        message = "VPN остановлен"
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) { Text("ОТКЛЮЧИТЬСЯ") }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
