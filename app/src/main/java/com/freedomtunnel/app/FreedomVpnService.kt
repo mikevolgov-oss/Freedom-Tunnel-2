@@ -24,8 +24,6 @@ class FreedomVpnService : VpnService() {
         const val EXTRA_CONFIG = "config"
         const val ACTION_STATUS = "com.freedomtunnel.app.STATUS"
         const val EXTRA_STATUS = "status"
-        const val ACTION_STATUS = "com.freedomtunnel.app.VPN_STATUS"
-        const val EXTRA_STATUS = "status"
         private const val CHANNEL_ID = "freedom_vpn"
         private const val NOTIFICATION_ID = 41
         private const val TAG = "FreedomVpnService"
