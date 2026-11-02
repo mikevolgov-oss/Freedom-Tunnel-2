@@ -186,11 +186,6 @@ class FreedomVpnService : VpnService() {
         return descriptor.fd
     }
 
-    private fun publishStatus(message: String) {
-        Log.i(TAG, message)
-        sendBroadcast(Intent(ACTION_STATUS).setPackage(packageName).putExtra(EXTRA_STATUS, message))
-    }
-
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
             val manager = getSystemService(NotificationManager::class.java)
