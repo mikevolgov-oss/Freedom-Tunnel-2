@@ -190,7 +190,7 @@ class FreedomVpnService : VpnService() {
                     val ip = address.address
                     val host = if (ip is Inet6Address) ip.hostAddress.substringBefore('%') else ip.hostAddress
                     "$host/${address.networkPrefixLength}"
-                )
+                })
                 var interfaceFlags = 0
                 if (runCatching { javaInterface.isUp }.getOrDefault(false)) {
                     interfaceFlags = interfaceFlags or OsConstants.IFF_UP or OsConstants.IFF_RUNNING
