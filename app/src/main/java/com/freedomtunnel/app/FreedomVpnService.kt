@@ -100,7 +100,7 @@ class FreedomVpnService : VpnService() {
             arrayOf(PlatformInterface::class.java)
         ) { _, method, args ->
             when (method.name) {
-                "usePlatformAutoDetectInterfaceControl" -> true
+                "usePlatformAutoDetectInterfaceControl" -> false
                 "useProcFS" -> true
                 "getInterfaces" -> getPlatformInterfaces()
                 "systemCertificates" -> StringArray(emptyList())
