@@ -92,7 +92,7 @@ object VlessConfig {
             )).put("final", "dns-remote"))
             .put("inbounds", inbounds)
             .put("outbounds", outbounds)
-            .put("route", JSONObject().put("auto_detect_interface", false).put("final", "proxy"))
+            .put("route", JSONObject().put("auto_detect_interface", true).put("final", "proxy"))
             .toString()
     }
 }
