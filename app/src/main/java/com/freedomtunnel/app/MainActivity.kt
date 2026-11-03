@@ -108,7 +108,9 @@ class MainActivity : ComponentActivity() {
                 onConnect = ::connect,
                 onDisconnect = { stopService(Intent(this, FreedomVpnService::class.java)) },
                 savedSubscription = prefs.getString("subscription", "https://radarhub.top/by-protocol/vless.txt").orEmpty(),
-                onSaveSubscription = { prefs.edit().putString("subscription", it).apply() }
+                onSaveSubscription = { prefs.edit().putString("subscription", it).apply() },
+                savedServers = prefs.getString("servers_cache", "").orEmpty(),
+                onSaveServers = { prefs.edit().putString("servers_cache", it).apply() }
             )
         }
     }
@@ -199,11 +201,13 @@ fun FreedomTunnelScreen(
     onConnect: (String) -> Unit,
     onDisconnect: () -> Unit,
     savedSubscription: String,
-    onSaveSubscription: (String) -> Unit
+    onSaveSubscription: (String) -> Unit,
+    savedServers: String,
+    onSaveServers: (String) -> Unit
 ) {
     var subscription by remember { mutableStateOf(savedSubscription) }
-    var servers by remember { mutableStateOf(emptyList<VlessServer>()) }
-    var selected by remember { mutableStateOf("") }
+    var servers by remember { mutableStateOf(parseVless(savedServers)) }
+    var selected by remember { mutableStateOf(parseVless(savedServers).firstOrNull()?.rawLink.orEmpty()) }
     var tab by remember { mutableIntStateOf(0) }
     var country by remember { mutableStateOf("Все страны") }
     var search by remember { mutableStateOf("") }
@@ -344,7 +348,11 @@ fun FreedomTunnelScreen(
                             if (urls.isEmpty()) {
                                 val parsed = parseVless(decodeSubscription(subscription))
                                 servers = parsed
-                                message = "Импортировано серверов: ${parsed.size}"
+                                selected = parsed.firstOrNull()?.rawLink.orEmpty()
+                                pingResults = emptyMap()
+                                failedPings = emptySet()
+                                onSaveServers(parsed.joinToString("\n") { it.rawLink })
+                                message = "Импортировано и сохранено серверов: ${parsed.size}"
                                 onSaveSubscription(subscription)
                             } else {
                                 loading = true
@@ -370,9 +378,10 @@ fun FreedomTunnelScreen(
                                         servers = result
                                         pingResults = emptyMap()
                                         failedPings = emptySet()
-                                        selected = ""
+                                        selected = result.firstOrNull()?.rawLink.orEmpty()
+                                        onSaveServers(result.joinToString("\n") { it.rawLink })
                                         loading = false
-                                        message = "Загружено: ${result.size} серверов из ${urls.size} подписок" +
+                                        message = "Загружено и сохранено: ${result.size} серверов из ${urls.size} подписок" +
                                             if (errors.isNotEmpty()) " • ошибок: ${errors.size}" else ""
                                         tab = 1
                                     }
