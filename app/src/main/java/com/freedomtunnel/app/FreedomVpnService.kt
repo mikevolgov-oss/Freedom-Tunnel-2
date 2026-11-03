@@ -86,7 +86,10 @@ class FreedomVpnService : VpnService() {
             workingPath = working.absolutePath
             tempPath = cacheDir.absolutePath
             logMaxLines = 1000
-            debug = false
+            debug = true
+            fixAndroidStack = true
+            commandServerListenPort = 0
+            commandServerSecret = Libbox.randomHex(32).value
             appVersion = "1"
             appMarketingVersion = "0.1.0"
         }
@@ -141,6 +144,7 @@ class FreedomVpnService : VpnService() {
             }
         } as CommandServerHandler
 
+        Libbox.checkConfig(config)
         val server = CommandServer(handler, platform)
         commandServer = server
         server.start()
