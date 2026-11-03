@@ -5,12 +5,21 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import android.net.VpnService
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.system.OsConstants
+import java.net.Inet6Address
+import java.net.NetworkInterface
+import java.util.Collections
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import io.nekohasekai.libbox.CommandServer
 import io.nekohasekai.libbox.CommandServerHandler
 import io.nekohasekai.libbox.Libbox
+import io.nekohasekai.libbox.NetworkInterfaceIterator
+import io.nekohasekai.libbox.StringIterator
+import io.nekohasekai.libbox.NetworkInterface as LibboxNetworkInterface
 import io.nekohasekai.libbox.OverrideOptions
 import io.nekohasekai.libbox.PlatformInterface
 import io.nekohasekai.libbox.SetupOptions
@@ -89,6 +98,9 @@ class FreedomVpnService : VpnService() {
         ) { _, method, args ->
             when (method.name) {
                 "usePlatformAutoDetectInterfaceControl" -> true
+                "useProcFS" -> true
+                "getInterfaces" -> getPlatformInterfaces()
+                "systemCertificates" -> StringArray(emptyList<String>().iterator())
                 "autoDetectInterfaceControl" -> {
                     protect(args!![0] as Int)
                     null
@@ -147,6 +159,61 @@ class FreedomVpnService : VpnService() {
                 .setPackage(packageName)
                 .putExtra(EXTRA_STATUS, message)
         )
+    }
+
+    private fun getPlatformInterfaces(): NetworkInterfaceIterator {
+        val connectivity = getSystemService(ConnectivityManager::class.java)
+        val javaInterfaces = runCatching { Collections.list(NetworkInterface.getNetworkInterfaces()) }
+            .getOrDefault(emptyList())
+        val result = mutableListOf<LibboxNetworkInterface>()
+        for (network in connectivity.allNetworks) {
+            val properties = connectivity.getLinkProperties(network) ?: continue
+            val capabilities = connectivity.getNetworkCapabilities(network) ?: continue
+            val name = properties.interfaceName ?: continue
+            val javaInterface = javaInterfaces.firstOrNull { it.name == name } ?: continue
+            val item = LibboxNetworkInterface().apply {
+                this.name = name
+                index = javaInterface.index
+                mtu = runCatching { javaInterface.mtu }.getOrDefault(1500)
+                type = when {
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> Libbox.InterfaceTypeWIFI
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> Libbox.InterfaceTypeCellular
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> Libbox.InterfaceTypeEthernet
+                    else -> Libbox.InterfaceTypeOther
+                }
+                dnsServer = StringArray(properties.dnsServers.mapNotNull { it.hostAddress }.iterator())
+                addresses = StringArray(javaInterface.interfaceAddresses.map { address ->
+                    val ip = address.address
+                    val host = if (ip is Inet6Address) ip.hostAddress.substringBefore('%') else ip.hostAddress
+                    "$host/${address.networkPrefixLength}"
+                }.iterator())
+                var interfaceFlags = 0
+                if (runCatching { javaInterface.isUp }.getOrDefault(false)) {
+                    interfaceFlags = interfaceFlags or OsConstants.IFF_UP or OsConstants.IFF_RUNNING
+                }
+                if (runCatching { javaInterface.isLoopback }.getOrDefault(false)) {
+                    interfaceFlags = interfaceFlags or OsConstants.IFF_LOOPBACK
+                }
+                if (runCatching { javaInterface.supportsMulticast() }.getOrDefault(false)) {
+                    interfaceFlags = interfaceFlags or OsConstants.IFF_MULTICAST
+                }
+                flags = interfaceFlags
+                metered = !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+            }
+            result += item
+        }
+        return InterfaceArray(result.iterator())
+    }
+
+    private class InterfaceArray(private val iterator: Iterator<LibboxNetworkInterface>) : NetworkInterfaceIterator {
+        override fun hasNext(): Boolean = iterator.hasNext()
+        override fun next(): LibboxNetworkInterface = iterator.next()
+    }
+
+    private class StringArray(private val iterator: Iterator<String>) : StringIterator {
+        override fun len(): Int = 0
+        override fun hasNext(): Boolean = iterator.hasNext()
+        override fun next(): String = iterator.next()
     }
 
     private fun establishTun(options: TunOptions): Int {
