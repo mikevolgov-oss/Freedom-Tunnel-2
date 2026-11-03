@@ -41,9 +41,8 @@ jobs:
 
       - name: Build CSQTT Android ARM64 client
         working-directory: csqtt-upstream/rust-client
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
         run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
           cargo ndk -t arm64-v8a -p 24 build --release
           mkdir -p ../../app/src/main/assets/csqtt/arm64-v8a
           cp target/aarch64-linux-android/release/client ../../app/src/main/assets/csqtt/arm64-v8a/client
