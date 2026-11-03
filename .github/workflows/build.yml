@@ -39,6 +39,10 @@ jobs:
       - name: Fetch pinned CSQTT source
         run: git clone --depth 1 --branch v2.5.0 https://github.com/amurcanov/csqtt.git csqtt-upstream
 
+      - name: Prepare CSQTT build resources
+        working-directory: csqtt-upstream
+        run: cp app/src/main/assets/domains.txt domains.txt
+
       - name: Build CSQTT Android ARM64 client
         working-directory: csqtt-upstream/rust-client
         run: |
