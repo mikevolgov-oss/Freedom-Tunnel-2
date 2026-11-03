@@ -130,7 +130,13 @@ class FreedomVpnService : VpnService() {
         ) { _, method, args ->
             when (method.name) {
                 "serviceStop" -> {
-                    stopTunnel()
+                    // Do not close CommandServer re-entrantly from its own callback.
+                    runCatching { tunFd?.close() }
+                    tunFd = null
+                    android.os.Handler(mainLooper).post {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
                     null
                 }
                 "serviceReload" -> null
@@ -186,6 +192,16 @@ class FreedomVpnService : VpnService() {
                     else -> Libbox.InterfaceTypeOther
                 }
                 dnsServer = StringArray(properties.dnsServers.mapNotNull { it.hostAddress })
+                dnsSearchDomain = StringArray(
+                    properties.domains?.split(' ')?.filter { it.isNotBlank() } ?: emptyList()
+                )
+                gateway = StringArray(
+                    properties.routes
+                        .filter { it.destination.prefixLength == 0 }
+                        .mapNotNull { it.gateway }
+                        .filterNot { it.isAnyLocalAddress }
+                        .mapNotNull { it.hostAddress }
+                )
                 addresses = StringArray(javaInterface.interfaceAddresses.map { address ->
                     val ip = address.address
                     val host = if (ip is Inet6Address) ip.hostAddress.substringBefore('%') else ip.hostAddress
