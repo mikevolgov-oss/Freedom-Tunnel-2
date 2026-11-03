@@ -9,11 +9,16 @@ android {
     compileSdk = 35
 
     defaultConfig {
+        ndk { abiFilters += "arm64-v8a" }
         applicationId = "com.freedomtunnel.app"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+    }
+
+    packaging {
+        jniLibs { useLegacyPackaging = true }
     }
 
     buildTypes {
