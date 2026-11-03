@@ -187,7 +187,7 @@ private fun parseVless(text: String): List<VlessServer> {
                 country = countryFor(label, host)
             )
         } catch (_: Exception) { null }
-    }.distinctBy { it.uuid + "@" + it.host + ":" + it.port }
+    }.distinctBy { it.uuid + "@" + it.host + ":" + it.port }.toList()
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
