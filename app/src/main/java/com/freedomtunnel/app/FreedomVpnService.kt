@@ -67,11 +67,7 @@ class FreedomVpnService : VpnService() {
                 Log.e(TAG, "Unable to start sing-box", e)
                 val detail = e.message ?: e.javaClass.simpleName
                 publishStatus("Ошибка запуска VPN: $detail")
-                runCatching {
-                    openFileOutput("last_vpn_error.txt", MODE_PRIVATE).bufferedWriter().use {
-                        it.write(Log.getStackTraceString(e))
-                    }
-                }
+                writeDiagnostic(Log.getStackTraceString(e))
                 stopTunnel()
             }
         }.start()
@@ -130,10 +126,15 @@ class FreedomVpnService : VpnService() {
         ) { _, method, args ->
             when (method.name) {
                 "serviceStop" -> {
-                    // Do not close CommandServer re-entrantly from its own callback.
+                    // sing-box calls this when its internal service stops. Preserve
+                    // the event before Android tears the VPN service down.
+                    Log.e(TAG, "sing-box requested serviceStop")
+                    writeDiagnostic("sing-box requested serviceStop")
+                    publishStatus("sing-box остановил туннель. Событие записано в журнал.")
                     runCatching { tunFd?.close() }
                     tunFd = null
                     android.os.Handler(mainLooper).post {
+                        runCatching { commandServer?.closeService() }
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     }
@@ -163,7 +164,19 @@ class FreedomVpnService : VpnService() {
         publishStatus("Команда sing-box принята. Проверяем подключение...")
     }
 
+    private fun writeDiagnostic(message: String) {
+        runCatching {
+            synchronized(this) {
+                openFileOutput("last_vpn_error.txt", MODE_PRIVATE or MODE_APPEND).bufferedWriter().use {
+                    it.appendLine("${System.currentTimeMillis()} $message")
+                }
+            }
+        }
+    }
+
     private fun publishStatus(message: String) {
+        Log.i(TAG, message)
+        writeDiagnostic(message)
         sendBroadcast(
             Intent(ACTION_STATUS)
                 .setPackage(packageName)
