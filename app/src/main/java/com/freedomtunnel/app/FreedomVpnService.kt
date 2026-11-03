@@ -252,7 +252,7 @@ class FreedomVpnService : VpnService() {
             runCatching {
                 process.inputStream.bufferedReader().forEachLine { line ->
                     Log.i(TAG, "CSQTT: $line")
-                    if (line.isNotBlank()) publishStatus("CSQTT: ${line.take(180)}")
+                    if (line.isNotBlank()) writeDiagnostic("CSQTT: ${line.take(500)}")
                 }
             }
         }.apply { isDaemon = true; start() }
@@ -270,7 +270,7 @@ class FreedomVpnService : VpnService() {
 
         var delivered = false
         var lastError: Throwable? = null
-        repeat(60) {
+        for (attempt in 1..60) {
             if (!process.isAlive) error("Клиент CSQTT завершился с кодом ${process.exitValue()}")
             val socket = LocalSocket()
             try {
@@ -286,8 +286,8 @@ class FreedomVpnService : VpnService() {
             } finally {
                 runCatching { socket.close() }
             }
-            if (delivered) return@repeat
-            Thread.sleep(500)
+            if (delivered) break
+            if (attempt < 60) Thread.sleep(500)
         }
         check(delivered) { "Не удалось передать TUN клиенту CSQTT: ${lastError?.message ?: "тайм-аут"}" }
         publishStatus("CSQTT: TUN передан нативному клиенту, соединение устанавливается")
