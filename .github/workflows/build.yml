@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Freedom Tunnel
         uses: actions/checkout@v4
 
       - name: Set up Java
@@ -21,6 +21,34 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Set up Android SDK and NDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "ndk;28.2.13676358"
+
+      - name: Set up Rust
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.97.1"
+          target: aarch64-linux-android
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Fetch pinned CSQTT source
+        run: git clone --depth 1 --branch v2.5.0 https://github.com/amurcanov/csqtt.git csqtt-upstream
+
+      - name: Build CSQTT Android ARM64 client
+        working-directory: csqtt-upstream/rust-client
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+        run: |
+          cargo ndk -t arm64-v8a -p 24 build --release
+          mkdir -p ../../app/src/main/assets/csqtt/arm64-v8a
+          cp target/aarch64-linux-android/release/client ../../app/src/main/assets/csqtt/arm64-v8a/client
+          chmod 755 ../../app/src/main/assets/csqtt/arm64-v8a/client
+          cp ../LICENSE ../../app/src/main/assets/csqtt/LICENSE.txt
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
