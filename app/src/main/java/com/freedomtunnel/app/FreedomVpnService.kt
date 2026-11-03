@@ -54,9 +54,15 @@ class FreedomVpnService : VpnService() {
         Thread {
             try {
                 startTunnel(config)
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e(TAG, "Unable to start sing-box", e)
-                publishStatus("Ошибка запуска VPN: ${e.javaClass.simpleName}: ${e.message ?: "без подробностей"}")
+                val detail = e.message ?: e.javaClass.simpleName
+                publishStatus("Ошибка запуска VPN: $detail")
+                runCatching {
+                    openFileOutput("last_vpn_error.txt", MODE_PRIVATE).bufferedWriter().use {
+                        it.write(Log.getStackTraceString(e))
+                    }
+                }
                 stopTunnel()
             }
         }.start()
