@@ -7,6 +7,8 @@ import android.content.Intent
 import android.net.VpnService
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.system.OsConstants
 import java.net.Inet6Address
 import java.net.NetworkInterface
@@ -25,12 +27,16 @@ import io.nekohasekai.libbox.PlatformInterface
 import io.nekohasekai.libbox.SetupOptions
 import io.nekohasekai.libbox.TunOptions
 import java.lang.reflect.Proxy
+import org.json.JSONObject
+import java.io.File
 
 class FreedomVpnService : VpnService() {
     companion object {
         const val ACTION_START = "com.freedomtunnel.app.START"
         const val ACTION_STOP = "com.freedomtunnel.app.STOP"
         const val EXTRA_CONFIG = "config"
+        const val EXTRA_ENGINE = "engine"
+        const val EXTRA_CSQTT_PROFILE = "csqtt_profile"
         const val ACTION_STATUS = "com.freedomtunnel.app.STATUS"
         const val EXTRA_STATUS = "status"
         private const val CHANNEL_ID = "freedom_vpn"
@@ -40,6 +46,7 @@ class FreedomVpnService : VpnService() {
 
     private var commandServer: CommandServer? = null
     private var tunFd: android.os.ParcelFileDescriptor? = null
+    @Volatile private var csqttProcess: Process? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -50,6 +57,26 @@ class FreedomVpnService : VpnService() {
         if (intent?.action == ACTION_STOP) {
             publishStatus("VPN остановлен")
             stopTunnel()
+            return START_NOT_STICKY
+        }
+        val engine = intent?.getStringExtra(EXTRA_ENGINE) ?: "vless"
+        if (engine == "csqtt") {
+            val profile = intent.getStringExtra(EXTRA_CSQTT_PROFILE)
+            if (profile.isNullOrBlank()) {
+                publishStatus("Ошибка: профиль CSQTT пустой")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            startInForeground()
+            publishStatus("CSQTT: запускаем нативный клиент...")
+            Thread {
+                try { startCsqtt(profile) } catch (e: Throwable) {
+                    Log.e(TAG, "Unable to start CSQTT", e)
+                    publishStatus("Ошибка CSQTT: ${e.message ?: e.javaClass.simpleName}")
+                    writeDiagnostic(Log.getStackTraceString(e))
+                    stopTunnel()
+                }
+            }.start()
             return START_NOT_STICKY
         }
         val config = intent?.getStringExtra(EXTRA_CONFIG)
@@ -171,6 +198,106 @@ class FreedomVpnService : VpnService() {
         Log.i(TAG, "sing-box service started")
         publishStatus("sing-box принял конфигурацию, VPN запускается")
         publishStatus("Команда sing-box принята. Проверяем подключение...")
+    }
+
+
+    /**
+     * Starts the pinned upstream CSQTT ARM64 executable and passes Android's TUN
+     * descriptor over the abstract Unix socket using SCM_RIGHTS, as required by
+     * the upstream Rust client protocol.
+     */
+    private fun startCsqtt(profileJson: String) {
+        check(Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }) { "CSQTT пока собран только для ARM64" }
+        val profile = JSONObject(profileJson)
+        val host = profile.getString("host")
+        val port = profile.getInt("port")
+        val password = profile.optString("password", "")
+        val hashes = profile.optJSONArray("hashes")
+        val hashList = (0 until (hashes?.length() ?: 0)).mapNotNull { hashes?.optString(it) }
+        val token = profile.optString("vkAccessToken", "")
+        require(hashList.isNotEmpty() || token.isNotBlank()) {
+            "В ссылке CSQTT нет VK-хешей или токена. Такой профиль нельзя запустить."
+        }
+        val binary = File(applicationInfo.nativeLibraryDir, "libclient.so")
+        check(binary.isFile && binary.canExecute()) { "Нативный клиент CSQTT не найден: ${binary.absolutePath}" }
+
+        val command = mutableListOf(
+            binary.absolutePath, "-peer", if (host.contains(":")) "[$host]:$port" else "$host:$port",
+            "-n", "10", "-listen", "127.0.0.1:0", "-tun-uds", "csqtt_tun_uds",
+            "-vk-hash-mode", if (hashList.isEmpty()) "auto_js" else "manual",
+            "-fingerprint", "firefox", "-client-ids", "8202606,6287487",
+            "-obfs", "unified", "-turn-transport", "udp", "-srtp-mode", "auto",
+            "-vk-auth-mode", "vkcalls", "-captcha-mode", "auto"
+        )
+        if (hashList.isNotEmpty()) { command += "-vk"; command += hashList.joinToString(",") }
+        val builder = ProcessBuilder(command).apply {
+            directory(filesDir)
+            redirectErrorStream(true)
+            environment()["LD_LIBRARY_PATH"] = applicationInfo.nativeLibraryDir
+            environment()["CSQTT_EVENTS"] = "1"
+            environment()["RAYON_NUM_THREADS"] = "2"
+            if (password.isNotEmpty()) environment()["CSQTT_PASSWORD"] = password
+        }
+        val process = builder.start()
+        csqttProcess = process
+        if (hashList.isEmpty() && token.isNotBlank()) {
+            val encoded = android.util.Base64.encodeToString(
+                JSONObject().put("token", token).toString().toByteArray(Charsets.UTF_8),
+                android.util.Base64.NO_WRAP
+            )
+            process.outputStream.write("VK_JS_BOOTSTRAP:$encoded\n".toByteArray(Charsets.UTF_8))
+            process.outputStream.flush()
+        }
+        Thread {
+            runCatching {
+                process.inputStream.bufferedReader().forEachLine { line ->
+                    Log.i(TAG, "CSQTT: $line")
+                    if (line.isNotBlank()) publishStatus("CSQTT: ${line.take(180)}")
+                }
+            }
+        }.apply { isDaemon = true; start() }
+
+        val descriptor = Builder()
+            .setSession("Freedom Tunnel CSQTT")
+            .setMtu(1500)
+            .addAddress("10.77.0.1", 30)
+            .addAddress("fd77:7777:7777::1", 126)
+            .addDnsServer("1.1.1.1")
+            .addRoute("0.0.0.0", 0)
+            .addRoute("::", 0)
+            .establish() ?: error("Android не выдал TUN-интерфейс для CSQTT")
+        tunFd = descriptor
+
+        var delivered = false
+        var lastError: Throwable? = null
+        repeat(60) {
+            if (!process.isAlive) error("Клиент CSQTT завершился с кодом ${process.exitValue()}")
+            val socket = LocalSocket()
+            try {
+                socket.connect(LocalSocketAddress("csqtt_tun_uds", LocalSocketAddress.Namespace.ABSTRACT))
+                socket.setFileDescriptorsForSend(arrayOf(descriptor.fileDescriptor))
+                socket.outputStream.write(1)
+                socket.outputStream.flush()
+                socket.soTimeout = 3000
+                check(socket.inputStream.read() == 1) { "Rust-клиент не подтвердил получение TUN" }
+                delivered = true
+            } catch (e: Throwable) {
+                lastError = e
+            } finally {
+                runCatching { socket.close() }
+            }
+            if (delivered) return@repeat
+            Thread.sleep(500)
+        }
+        check(delivered) { "Не удалось передать TUN клиенту CSQTT: ${lastError?.message ?: "тайм-аут"}" }
+        publishStatus("CSQTT: TUN передан нативному клиенту, соединение устанавливается")
+        Thread {
+            val code = runCatching { process.waitFor() }.getOrDefault(-1)
+            if (csqttProcess === process) {
+                publishStatus("CSQTT завершился (код $code)")
+                stopTunnel()
+            }
+        }.apply { isDaemon = true; start() }
     }
 
     private fun writeDiagnostic(message: String) {
@@ -327,6 +454,8 @@ class FreedomVpnService : VpnService() {
     }
 
     private fun stopTunnel() {
+        runCatching { csqttProcess?.destroy() }
+        csqttProcess = null
         runCatching { commandServer?.closeService() }
         runCatching { commandServer?.close() }
         commandServer = null
