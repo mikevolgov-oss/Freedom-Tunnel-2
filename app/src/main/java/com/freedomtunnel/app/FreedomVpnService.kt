@@ -141,6 +141,15 @@ class FreedomVpnService : VpnService() {
                     null
                 }
                 "serviceReload" -> null
+                "getSystemProxyStatus" -> {
+                    // This callback is part of libbox 1.14.x. Returning null here can
+                    // make the native command server fail while initializing its service.
+                    io.nekohasekai.libbox.SystemProxyStatus().apply {
+                        available = false
+                        enabled = false
+                    }
+                }
+                "setSystemProxyEnabled" -> null
                 "writeDebugMessage" -> {
                     Log.d(TAG, args?.firstOrNull()?.toString() ?: "")
                     null
