@@ -33,6 +33,8 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.URL
 import java.util.Locale
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.concurrent.Executors
 
 data class VlessServer(
@@ -50,6 +52,8 @@ data class VlessServer(
 
 class MainActivity : ComponentActivity() {
     private var pendingVpnConfig = ""
+    private var pendingEngine = "vless"
+    private var pendingCsqttProfile = ""
     private val statusState = mutableStateOf("")
     private val vpnRequestCode = 410
     private val receiver = object : BroadcastReceiver() {
@@ -75,6 +79,7 @@ class MainActivity : ComponentActivity() {
 
     private fun connect(link: String) {
         try {
+            pendingEngine = "vless"
             pendingVpnConfig = VlessConfig.fromLink(link)
             val permission = VpnService.prepare(this)
             if (permission != null) {
@@ -86,10 +91,39 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun connectCsqtt(link: String) {
+        try {
+            val profile = CsqttLinkParser.parse(link) ?: error("Не удалось расшифровать ссылку CSQTT")
+            require(profile.hashes.isNotEmpty() || profile.vkAccessToken.isNotBlank()) {
+                "В ссылке нет VK-хешей или токена. Нужна полноценная ссылка CSQTT."
+            }
+            pendingEngine = "csqtt"
+            pendingCsqttProfile = JSONObject()
+                .put("host", profile.host)
+                .put("port", profile.port)
+                .put("password", profile.password)
+                .put("hashes", JSONArray(profile.hashes))
+                .put("vkAccessToken", profile.vkAccessToken)
+                .toString()
+            val permission = VpnService.prepare(this)
+            if (permission != null) {
+                @Suppress("DEPRECATION")
+                startActivityForResult(permission, vpnRequestCode)
+            } else startVpn()
+        } catch (e: Throwable) {
+            statusState.value = "Ошибка CSQTT: ${e.message ?: e.javaClass.simpleName}"
+        }
+    }
+
     private fun startVpn() {
         val intent = Intent(this, FreedomVpnService::class.java)
             .setAction(FreedomVpnService.ACTION_START)
-            .putExtra(FreedomVpnService.EXTRA_CONFIG, pendingVpnConfig)
+            .putExtra(FreedomVpnService.EXTRA_ENGINE, pendingEngine)
+        if (pendingEngine == "csqtt") {
+            intent.putExtra(FreedomVpnService.EXTRA_CSQTT_PROFILE, pendingCsqttProfile)
+        } else {
+            intent.putExtra(FreedomVpnService.EXTRA_CONFIG, pendingVpnConfig)
+        }
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
     }
 
@@ -106,6 +140,7 @@ class MainActivity : ComponentActivity() {
             FreedomTunnelScreen(
                 serviceStatus = statusState.value,
                 onConnect = ::connect,
+                onConnectCsqtt = ::connectCsqtt,
                 onDisconnect = { stopService(Intent(this, FreedomVpnService::class.java)) },
                 savedSubscription = prefs.getString("subscription", "https://raw.githubusercontent.com/CaptchaQ/vless-servers/main/working_lite.txt").orEmpty(),
                 onSaveSubscription = { prefs.edit().putString("subscription", it).apply() },
@@ -202,6 +237,7 @@ private fun parseVless(text: String): List<VlessServer> {
 fun FreedomTunnelScreen(
     serviceStatus: String,
     onConnect: (String) -> Unit,
+    onConnectCsqtt: (String) -> Unit,
     onDisconnect: () -> Unit,
     savedSubscription: String,
     onSaveSubscription: (String) -> Unit,
@@ -209,6 +245,7 @@ fun FreedomTunnelScreen(
     onSaveServers: (String) -> Unit
 ) {
     var subscription by remember { mutableStateOf(savedSubscription) }
+    var csqttLink by remember { mutableStateOf("") }
     var servers by remember { mutableStateOf(parseVless(savedServers)) }
     var selected by remember { mutableStateOf(parseVless(savedServers).firstOrNull()?.rawLink.orEmpty()) }
     var tab by remember { mutableIntStateOf(0) }
@@ -277,6 +314,25 @@ fun FreedomTunnelScreen(
                         Text("VLESS • быстрый выбор сервера", color = Color.LightGray, fontSize = 12.sp)
                     }
                     Text("${servers.size} серверов", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(10.dp))
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF172338)), shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                        Text("CSQTT • альтернативный движок", color = green, fontWeight = FontWeight.Bold)
+                        OutlinedTextField(
+                            value = csqttLink,
+                            onValueChange = { csqttLink = it },
+                            label = { Text("Зашифрованная ссылка csqtt://") },
+                            modifier = Modifier.fillMaxWidth(),
+                            minLines = 1,
+                            maxLines = 3
+                        )
+                        Button(
+                            onClick = { onConnectCsqtt(csqttLink) },
+                            enabled = csqttLink.trim().startsWith("csqtt://", true),
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("ПОДКЛЮЧИТЬ CSQTT") }
+                    }
                 }
                 Spacer(Modifier.height(10.dp))
                 Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF172338)), shape = RoundedCornerShape(16.dp)) {
