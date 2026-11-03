@@ -1,9 +1,9 @@
 package com.freedomtunnel.app
 
+import android.util.Base64
 import java.net.URI
 import java.net.URLDecoder
 import java.security.MessageDigest
-import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -65,7 +65,7 @@ object CsqttLinkParser {
     private fun decrypt(payload: String): String? = runCatching {
         val normalized = payload.replace('-', '+').replace('_', '/')
         val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
-        val bytes = Base64.getDecoder().decode(padded)
+        val bytes = Base64.decode(padded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
         require(bytes.size >= 28)
         val key = MessageDigest.getInstance("SHA-256").digest(KEY_SEED.toByteArray(Charsets.UTF_8))
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
