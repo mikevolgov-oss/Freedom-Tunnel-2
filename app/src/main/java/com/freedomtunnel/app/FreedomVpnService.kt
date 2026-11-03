@@ -103,7 +103,7 @@ class FreedomVpnService : VpnService() {
                 "usePlatformAutoDetectInterfaceControl" -> true
                 "useProcFS" -> true
                 "getInterfaces" -> getPlatformInterfaces()
-                "systemCertificates" -> StringArray(emptyList<String>().iterator())
+                "systemCertificates" -> StringArray(emptyList())
                 "autoDetectInterfaceControl" -> {
                     protect(args!![0] as Int)
                     null
@@ -185,12 +185,12 @@ class FreedomVpnService : VpnService() {
                     capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> Libbox.InterfaceTypeEthernet
                     else -> Libbox.InterfaceTypeOther
                 }
-                dnsServer = StringArray(properties.dnsServers.mapNotNull { it.hostAddress }.iterator())
+                dnsServer = StringArray(properties.dnsServers.mapNotNull { it.hostAddress })
                 addresses = StringArray(javaInterface.interfaceAddresses.map { address ->
                     val ip = address.address
                     val host = if (ip is Inet6Address) ip.hostAddress.substringBefore('%') else ip.hostAddress
                     "$host/${address.networkPrefixLength}"
-                }.iterator())
+                )
                 var interfaceFlags = 0
                 if (runCatching { javaInterface.isUp }.getOrDefault(false)) {
                     interfaceFlags = interfaceFlags or OsConstants.IFF_UP or OsConstants.IFF_RUNNING
@@ -214,10 +214,12 @@ class FreedomVpnService : VpnService() {
         override fun next(): LibboxNetworkInterface = iterator.next()
     }
 
-    private class StringArray(private val iterator: Iterator<String>) : StringIterator {
-        override fun len(): Int = 0
-        override fun hasNext(): Boolean = iterator.hasNext()
-        override fun next(): String = iterator.next()
+    private class StringArray(values: List<String>) : StringIterator {
+        private val items = values
+        private var position = 0
+        override fun len(): Int = items.size
+        override fun hasNext(): Boolean = position < items.size
+        override fun next(): String = items[position++]
     }
 
     private fun establishTun(options: TunOptions): Int {
