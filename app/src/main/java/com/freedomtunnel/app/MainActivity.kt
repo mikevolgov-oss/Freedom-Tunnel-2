@@ -1,23 +1,20 @@
-
 package com.freedomtunnel.app
 
-import android.net.Uri
-import android.net.VpnService
-import android.content.Intent
+import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
 import android.content.IntentFilter
-import android.app.Activity
+import android.net.Uri
+import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -30,9 +27,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.net.HttpURLConnection
-import java.net.URL
-import java.net.Socket
 import java.net.InetSocketAddress
+import java.net.Socket
+import java.net.URL
+import java.util.Locale
 import java.util.concurrent.Executors
 
 data class VlessServer(
@@ -42,524 +40,374 @@ data class VlessServer(
     val uuid: String,
     val security: String,
     val network: String,
-    val rawLink: String
-)
+    val rawLink: String,
+    val country: String
+) {
+    val key: String get() = "$host:$port"
+}
 
 class MainActivity : ComponentActivity() {
-    private var pendingVpnConfig: String = ""
-    private val vpnStatus = mutableStateOf("")
+    private var pendingVpnConfig = ""
+    private val statusState = mutableStateOf("")
     private val vpnRequestCode = 410
-    private val vpnStatusReceiver = object : BroadcastReceiver() {
+    private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            val text = intent?.getStringExtra(FreedomVpnService.EXTRA_STATUS) ?: return
-            runOnUiThread {
-                android.widget.Toast.makeText(this@MainActivity, text, android.widget.Toast.LENGTH_LONG).show()
-            }
+            statusState.value = intent?.getStringExtra(FreedomVpnService.EXTRA_STATUS).orEmpty()
         }
     }
 
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter(FreedomVpnService.ACTION_STATUS)
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(vpnStatusReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        else {
             @Suppress("DEPRECATION")
-            registerReceiver(vpnStatusReceiver, filter)
+            registerReceiver(receiver, filter)
         }
     }
 
     override fun onStop() {
-        runCatching { unregisterReceiver(vpnStatusReceiver) }
+        runCatching { unregisterReceiver(receiver) }
         super.onStop()
     }
-    private fun requestVpn(config: String) {
-        pendingVpnConfig = config
-        val permissionIntent = VpnService.prepare(this)
-        if (permissionIntent != null) {
-            @Suppress("DEPRECATION")
-            startActivityForResult(permissionIntent, vpnRequestCode)
-        } else startVpnService()
+
+    private fun connect(link: String) {
+        try {
+            pendingVpnConfig = VlessConfig.fromLink(link)
+            val permission = VpnService.prepare(this)
+            if (permission != null) {
+                @Suppress("DEPRECATION")
+                startActivityForResult(permission, vpnRequestCode)
+            } else startVpn()
+        } catch (e: Throwable) {
+            statusState.value = "Ошибка конфигурации: ${e.message ?: e.javaClass.simpleName}"
+        }
     }
-    @Suppress("DEPRECATION")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == vpnRequestCode && resultCode == Activity.RESULT_OK) startVpnService()
-    }
-    private fun startVpnService() {
+
+    private fun startVpn() {
         val intent = Intent(this, FreedomVpnService::class.java)
             .setAction(FreedomVpnService.ACTION_START)
             .putExtra(FreedomVpnService.EXTRA_CONFIG, pendingVpnConfig)
         if (Build.VERSION.SDK_INT >= 26) startForegroundService(intent) else startService(intent)
     }
-    private fun stopVpnService() {
-        stopService(Intent(this, FreedomVpnService::class.java))
-    }
-    override fun onDestroy() {
-        super.onDestroy()
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == vpnRequestCode && resultCode == Activity.RESULT_OK) startVpn()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         val prefs = getSharedPreferences("freedom_tunnel_config", MODE_PRIVATE)
-
         setContent {
             FreedomTunnelScreen(
-                serviceStatus = vpnStatus.value,
-                onConnect = { link ->
-                    try {
-                        vpnStatus.value = "Запрашиваем разрешение Android и запускаем VPN..."
-                        requestVpn(VlessConfig.fromLink(link))
-                    } catch (e: Exception) {
-                        vpnStatus.value = "Ошибка конфигурации: ${e.message ?: e.javaClass.simpleName}"
-                    }
-                },
-                onDisconnect = { stopVpnService() },
-                savedServer = prefs.getString("server", "") ?: "",
-                savedPort = prefs.getString("port", "443") ?: "443",
-                savedUuid = prefs.getString("uuid", "") ?: "",
-                onSave = { server, port, uuid ->
-                    prefs.edit()
-                        .putString("server", server)
-                        .putString("port", port)
-                        .putString("uuid", uuid)
-                        .apply()
-                }
+                serviceStatus = statusState.value,
+                onConnect = ::connect,
+                onDisconnect = { stopService(Intent(this, FreedomVpnService::class.java)) },
+                savedSubscription = prefs.getString("subscription", "https://radarhub.top/by-protocol/vless.txt").orEmpty(),
+                onSaveSubscription = { prefs.edit().putString("subscription", it).apply() }
             )
         }
     }
 }
 
+private fun decodeSubscription(raw: String): String {
+    val trimmed = raw.trim().removePrefix("\uFEFF")
+    if (trimmed.contains("://")) return trimmed
+    val compact = trimmed.filterNot { it.isWhitespace() }
+    val candidates = listOf(Base64.DEFAULT, Base64.NO_WRAP, Base64.URL_SAFE or Base64.NO_WRAP)
+    for (flags in candidates) {
+        try {
+            val decoded = Base64.decode(compact, flags).toString(Charsets.UTF_8)
+            if (decoded.contains("://")) return decoded
+        } catch (_: Exception) { }
+    }
+    return trimmed
+}
+
+private fun countryFor(name: String, host: String): String {
+    val text = name.lowercase(Locale.ROOT)
+    val rules = listOf(
+        listOf("🇩🇪", "germany", "deutschland", "германия", "немец", "germany", "de-"),
+        listOf("🇳🇱", "netherlands", "holland", "нидерланд", "голланд", "nl-"),
+        listOf("🇫🇷", "france", "франция", "fr-"),
+        listOf("🇫🇮", "finland", "финлянд", "fi-"),
+        listOf("🇸🇪", "sweden", "швеци", "se-"),
+        listOf("🇳🇴", "norway", "норвег", "no-"),
+        listOf("🇵🇱", "poland", "польш", "pl-"),
+        listOf("🇨🇿", "czech", "чех", "cz-"),
+        listOf("🇨🇭", "switzerland", "швейцар", "ch-"),
+        listOf("🇦🇹", "austria", "австри", "at-"),
+        listOf("🇬🇧", "united kingdom", "uk", "britain", "англи", "великобрит", "gb-"),
+        listOf("🇺🇸", "united states", "usa", "america", "сша", "америк", "us-"),
+        listOf("🇨🇦", "canada", "канада", "ca-"),
+        listOf("🇯🇵", "japan", "япони", "jp-"),
+        listOf("🇸🇬", "singapore", "сингапур", "sg-"),
+        listOf("🇹🇷", "turkey", "турци", "tr-"),
+        listOf("🇷🇺", "russia", "росси", "ru-"),
+        listOf("🇪🇸", "spain", "испан", "es-"),
+        listOf("🇮🇹", "italy", "итал", "it-"),
+        listOf("🇧🇪", "belgium", "бельги", "be-"),
+        listOf("🇱🇻", "latvia", "латви", "lv-"),
+        listOf("🇪🇪", "estonia", "эстони", "ee-"),
+        listOf("🇱🇹", "lithuania", "литв", "lt-"),
+        listOf("🇭🇰", "hong kong", "гонконг", "hk-"),
+        listOf("🇰🇷", "korea", "корея", "kr-"),
+        listOf("🇮🇳", "india", "индия", "in-"),
+        listOf("🇧🇷", "brazil", "бразил", "br-"),
+        listOf("🇦🇪", "uae", "emirates", "оаэ", "араб", "ae-")
+    )
+    for (rule in rules) if (rule.drop(1).any { text.contains(it) }) return "${rule[0]} ${rule[1].replaceFirstChar { it.uppercase() }}"
+    val flag = Regex("[\\uD83C][\\uDDE6-\\uDDFF]{2}").find(name)?.value
+    return if (flag != null) "$flag Другая страна" else "🌐 Другие / не определена"
+}
+
+private fun parseVless(text: String): List<VlessServer> {
+    val links = Regex("vless://[^\\s\\\"'<>]+", RegexOption.IGNORE_CASE)
+        .findAll(text.replace("&amp;", "&"))
+        .map { it.value.trimEnd(',', ';', ')', ']') }
+        .distinct()
+    return links.mapNotNull { link ->
+        try {
+            val uri = Uri.parse(link)
+            val host = uri.host ?: return@mapNotNull null
+            val port = uri.port
+            val uuid = uri.userInfo ?: return@mapNotNull null
+            if (port !in 1..65535) return@mapNotNull null
+            val label = Uri.decode(uri.fragment ?: "").ifBlank { host }
+            VlessServer(
+                name = label,
+                host = host,
+                port = port.toString(),
+                uuid = uuid,
+                security = uri.getQueryParameter("security") ?: "none",
+                network = uri.getQueryParameter("type") ?: "tcp",
+                rawLink = link,
+                country = countryFor(label, host)
+            )
+        } catch (_: Exception) { null }
+    }.distinctBy { it.uuid + "@" + it.host + ":" + it.port }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FreedomTunnelScreen(
     serviceStatus: String,
     onConnect: (String) -> Unit,
     onDisconnect: () -> Unit,
-    savedServer: String,
-    savedPort: String,
-    savedUuid: String,
-    onSave: (String, String, String) -> Unit
+    savedSubscription: String,
+    onSaveSubscription: (String) -> Unit
 ) {
-    var server by remember { mutableStateOf(savedServer) }
-    var port by remember { mutableStateOf(savedPort) }
-    var uuid by remember { mutableStateOf(savedUuid) }
+    var subscription by remember { mutableStateOf(savedSubscription) }
+    var servers by remember { mutableStateOf(emptyList<VlessServer>()) }
+    var selected by remember { mutableStateOf("") }
+    var tab by remember { mutableIntStateOf(0) }
+    var country by remember { mutableStateOf("Все страны") }
+    var search by remember { mutableStateOf("") }
+    var pingResults by remember { mutableStateOf(mapOf<String, Long>()) }
+    var failedPings by remember { mutableStateOf(setOf<String>()) }
+    var pinging by remember { mutableStateOf(setOf<String>()) }
+    var loading by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("Добавьте ссылку на подписку и загрузите серверы") }
+    val executor = remember { Executors.newFixedThreadPool(8) }
+    val green = Color(0xFF56D6A0)
+    val bg = Color(0xFF0B1220)
 
-    var subscription by remember {
-        mutableStateOf("https://radarhub.top/by-protocol/vless.txt")
+    fun pingServer(server: VlessServer) {
+        if (server.key in pinging || pingResults.containsKey(server.key) || server.key in failedPings) return
+        pinging = pinging + server.key
+        executor.execute {
+            val start = System.nanoTime()
+            val success = try {
+                Socket().use { it.connect(InetSocketAddress(server.host, server.port.toInt()), 2500) }
+                true
+            } catch (_: Exception) { false }
+            val ms = (System.nanoTime() - start) / 1_000_000
+            pinging = pinging - server.key
+            if (success) pingResults = pingResults + (server.key to ms)
+            else failedPings = failedPings + server.key
+        }
     }
 
-    var servers by remember { mutableStateOf(listOf<VlessServer>()) }
-    var selectedLink by remember { mutableStateOf("") }
-    var pingResults by remember { mutableStateOf(mapOf<String, String>()) }
-    var pinging by remember { mutableStateOf(setOf<String>()) }
-    var message by remember { mutableStateOf("Загрузите список серверов") }
-    var loading by remember { mutableStateOf(false) }
+    fun pingAll(list: List<VlessServer>) {
+        list.forEach { pingServer(it) }
+    }
 
-    val handler = remember { Handler(Looper.getMainLooper()) }
-    val executor = remember { Executors.newSingleThreadExecutor() }
+    val countries = servers.map { it.country }.distinct().sorted()
+    val visible = servers.filter {
+        (country == "Все страны" || it.country == country) &&
+            (search.isBlank() || it.name.contains(search, true) || it.host.contains(search, true))
+    }.sortedWith(compareBy<VlessServer> { if (pingResults.containsKey(it.key)) 0 else if (it.key in failedPings) 2 else 1 }
+        .thenBy { pingResults[it.key] ?: Long.MAX_VALUE }
+        .thenBy { it.name })
 
-    val green = Color(0xFF56D6A0)
-    val background = Color(0xFF0B1220)
-
-    MaterialTheme(colorScheme = darkColorScheme(primary = green)) {
+    MaterialTheme(colorScheme = darkColorScheme(primary = green, background = bg, surface = Color(0xFF172338))) {
         Scaffold(
-            modifier = Modifier.fillMaxSize(),
-            containerColor = background,
+            containerColor = bg,
             bottomBar = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 10.dp)
-                ) {
-                    Button(
-                        onClick = {
-                            if (selectedLink.isBlank()) message = "Сначала выберите сервер из списка"
-                            else {
-                                onConnect(selectedLink)
-                                message = "Запрашиваем разрешение Android и запускаем VPN..."
-                            }
-                        },
-                        enabled = selectedLink.isNotBlank(),
-                        modifier = Modifier.fillMaxWidth().height(52.dp),
-                        shape = RoundedCornerShape(14.dp)
-                    ) { Text("ПОДКЛЮЧИТЬСЯ") }
-
-                    OutlinedButton(
-                        onClick = {
-                            onDisconnect()
-                            message = "VPN остановлен"
-                        },
-                        modifier = Modifier.fillMaxWidth()
-                    ) { Text("ОТКЛЮЧИТЬСЯ") }
+                NavigationBar(containerColor = Color(0xFF111D30)) {
+                    listOf("Главная", "Страны", "Подписка").forEachIndexed { index, label ->
+                        NavigationBarItem(
+                            selected = tab == index,
+                            onClick = { tab = index },
+                            icon = { Text(listOf("⌂", "◎", "⇅")[index], fontSize = 20.sp) },
+                            label = { Text(label) }
+                        )
+                    }
                 }
             }
-        ) { contentPadding ->
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(contentPadding)
-                    .padding(horizontal = 20.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    "FREEDOM",
-                    color = Color.White,
-                    fontSize = 32.sp,
-                    fontWeight = FontWeight.Black,
-                    letterSpacing = 3.sp
-                )
-
-                Text(
-                    "TUNNEL",
-                    color = green,
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 7.sp
-                )
-
-                Spacer(modifier = Modifier.height(25.dp))
-
-                Text(
-                    "Подписка VLESS",
-                    color = Color.White,
-                    fontSize = 21.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = subscription,
-                    onValueChange = { subscription = it },
-                    label = { Text("Ссылка на подписку") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Button(
-                    onClick = {
-                        if (subscription.isBlank()) {
-                            message = "Введите ссылку на подписку"
-                        } else {
-                            loading = true
-                            message = "Загружаем серверы..."
-
-                            executor.execute {
-                                try {
-                                    val connection =
-                                        URL(subscription).openConnection()
-                                            as HttpURLConnection
-
-                                    connection.connectTimeout = 15000
-                                    connection.readTimeout = 20000
-                                    connection.requestMethod = "GET"
-                                    connection.setRequestProperty(
-                                        "User-Agent",
-                                        "FreedomTunnel/0.3"
-                                    )
-
-                                    val response = connection.inputStream
-                                        .bufferedReader()
-                                        .use { it.readText() }
-
-                                    connection.disconnect()
-
-                                    var content = response.trim()
-
-                                    if (!content.contains("vless://")) {
-                                        val decoded = try {
-                                            String(
-                                                Base64.decode(
-                                                    content,
-                                                    Base64.DEFAULT
-                                                )
-                                            )
-                                        } catch (e: Exception) {
-                                            ""
-                                        }
-
-                                        if (decoded.contains("vless://")) {
-                                            content = decoded
-                                        }
-                                    }
-
-                                    val found = content.lines().mapNotNull { line ->
-                                        try {
-                                            val start = line.indexOf("vless://")
-                                            if (start < 0) return@mapNotNull null
-
-                                            val link = line.substring(start).trim()
-                                            val uri = Uri.parse(link)
-
-                                            val host = uri.host
-                                                ?: return@mapNotNull null
-                                            val portValue = uri.port
-                                            val id = uri.userInfo
-                                                ?: return@mapNotNull null
-
-                                            if (portValue == null ||
-                                                portValue !in 1..65535
-                                            ) {
-                                                return@mapNotNull null
-                                            }
-
-                                            VlessServer(
-                                                name = Uri.decode(
-                                                    uri.fragment ?: host
-                                                ),
-                                                host = host,
-                                                port = portValue.toString(),
-                                                uuid = id,
-                                                security = uri.getQueryParameter(
-                                                    "security"
-                                                ) ?: "none",
-                                                network = uri.getQueryParameter(
-                                                    "type"
-                                                ) ?: "tcp",
-                                                rawLink = link
-                                            )
-                                        } catch (e: Exception) {
-                                            null
-                                        }
-                                    }.distinctBy {
-                                        it.uuid + it.host + it.port
-                                    }
-
-                                    handler.post {
-                                        servers = found
-                                        loading = false
-                                        message = if (found.isEmpty()) {
-                                            "Серверы VLESS не найдены"
-                                        } else {
-                                            "Найдено серверов: ${found.size}"
-                                        }
-                                    }
-                                } catch (e: Exception) {
-                                    handler.post {
-                                        loading = false
-                                        message =
-                                            "Ошибка загрузки: ${e.message ?: "проверьте интернет"}"
-                                    }
-                                }
-                            }
-                        }
-                    },
-                    enabled = !loading,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text(
-                        if (loading) "ЗАГРУЗКА..." else "ЗАГРУЗИТЬ СЕРВЕРЫ",
-                        fontWeight = FontWeight.Bold
-                    )
+        ) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 10.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.weight(1f)) {
+                        Text("FREEDOM TUNNEL", color = green, fontSize = 22.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
+                        Text("VLESS • быстрый выбор сервера", color = Color.LightGray, fontSize = 12.sp)
+                    }
+                    Text("${servers.size} серверов", color = Color.White, fontWeight = FontWeight.Bold)
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Text(
-                    serviceStatus.ifBlank { message },
-                    color = Color(0xFFFFC66D),
-                    fontSize = 14.sp
-                )
-
-                if (servers.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(20.dp))
-
-                    Text(
-                        "НАЙДЕННЫЕ СЕРВЕРЫ",
-                        color = green,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-
-                    val sortedServers = servers.sortedWith(
-                        compareBy<VlessServer> { item ->
-                            val value = pingResults["${item.host}:${item.port}"]
-                            when {
-                                value == null -> 2
-                                value.endsWith("мс") -> 0
-                                else -> 1
-                            }
-                        }.thenBy { item ->
-                            pingResults["${item.host}:${item.port}"]
-                                ?.substringBefore(" ")?.toLongOrNull() ?: Long.MAX_VALUE
-                        }
-                    )
-                    sortedServers.forEachIndexed { index, item ->
-                        Card(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 5.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color(0xFF172338)
-                            )
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(14.dp)
-                            ) {
-                                Text(
-                                    item.name.ifBlank { "Сервер ${index + 1}" },
-                                    color = Color.White,
-                                    fontWeight = FontWeight.Bold
-                                )
-
-                                Text(
-                                    "${item.host}:${item.port}",
-                                    color = Color.LightGray,
-                                    fontSize = 13.sp
-                                )
-
-                                Text(
-                                    "Защита: ${item.security} • Сеть: ${item.network}",
-                                    color = Color.LightGray,
-                                    fontSize = 12.sp
-                                )
-                                val pingKey = "${item.host}:${item.port}"
-                                Text(
-                                    "TCP-пинг: ${pingResults[pingKey] ?: "не проверен"}",
-                                    color = Color(0xFF9FB3C8),
-                                    fontSize = 12.sp
-                                )
-                                Spacer(modifier = Modifier.height(8.dp))
-                                OutlinedButton(
-                                    onClick = {
-                                        if (pingKey !in pinging) {
-                                            pinging = pinging + pingKey
-                                            executor.execute {
-                                                val started = System.nanoTime()
-                                                val result = try {
-                                                    Socket().use { socket ->
-                                                        socket.connect(InetSocketAddress(item.host, item.port.toInt()), 5000)
-                                                    }
-                                                    "${(System.nanoTime() - started) / 1_000_000} мс"
-                                                } catch (_: Exception) { "нет ответа" }
-                                                handler.post {
-                                                    pingResults = pingResults + (pingKey to result)
-                                                    pinging = pinging - pingKey
-                                                }
-                                            }
-                                        }
-                                    },
-                                    enabled = pingKey !in pinging,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) { Text(if (pingKey in pinging) "ПРОВЕРЯЕМ..." else "ПРОВЕРИТЬ TCP-ПИНГ") }
-
-                                Button(
-                                    onClick = {
-                                        server = item.host
-                                        port = item.port
-                                        uuid = item.uuid
-                                        selectedLink = item.rawLink
-                                        message = "Сервер выбран: ${item.name}"
-                                    },
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text("ВЫБРАТЬ ЭТОТ СЕРВЕР")
-                                }
-                            }
+                Spacer(Modifier.height(10.dp))
+                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF172338)), shape = RoundedCornerShape(16.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                        Text(if (selected.isBlank()) "Сервер не выбран" else "Выбран: ${servers.firstOrNull { it.rawLink == selected }?.name ?: "сервер"}",
+                            color = Color.White, fontWeight = FontWeight.Bold)
+                        Text(serviceStatus.ifBlank { message }, color = Color(0xFFFFC66D), fontSize = 12.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = { if (selected.isNotBlank()) onConnect(selected) else message = "Сначала выберите сервер" },
+                                enabled = selected.isNotBlank(), modifier = Modifier.weight(1f)) { Text("ПОДКЛЮЧИТЬ") }
+                            OutlinedButton(onClick = onDisconnect, modifier = Modifier.weight(1f)) { Text("ОТКЛЮЧИТЬ") }
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    "ПАРАМЕТРЫ СЕРВЕРА",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                OutlinedTextField(
-                    value = server,
-                    onValueChange = { server = it },
-                    label = { Text("Адрес сервера") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                OutlinedTextField(
-                    value = port,
-                    onValueChange = {
-                        port = it.filter(Char::isDigit).take(5)
-                    },
-                    label = { Text("Порт") },
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number
-                    ),
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                OutlinedTextField(
-                    value = uuid,
-                    onValueChange = { uuid = it },
-                    label = { Text("UUID") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Button(
-                    onClick = {
-                        val validPort = port.toIntOrNull()
-                        val validUuid = Regex(
-                            "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-                        ).matches(uuid.trim())
-
-                        when {
-                            server.isBlank() ->
-                                message = "Введите адрес сервера"
-
-                            validPort == null || validPort !in 1..65535 ->
-                                message = "Проверьте номер порта"
-
-                            !validUuid ->
-                                message = "Проверьте UUID"
-
-                            else -> {
-                                onSave(server.trim(), port, uuid.trim())
-                                message = "Настройки сохранены"
+                Spacer(Modifier.height(12.dp))
+                when (tab) {
+                    0 -> {
+                        Text("БЫСТРЫЙ ВЫБОР", color = Color.White, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(8.dp))
+                        val fastest = servers.filter { pingResults.containsKey(it.key) }.minByOrNull { pingResults[it.key] ?: Long.MAX_VALUE }
+                        if (fastest != null) ServerCard(fastest, pingResults[fastest.key], fastest.key in pinging, selected == fastest.rawLink,
+                            { selected = fastest.rawLink }, { pingServer(fastest) }, { onConnect(fastest.rawLink) })
+                        else Text("Проверьте пинг, чтобы найти самый быстрый сервер.", color = Color.LightGray, fontSize = 13.sp)
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { pingAll(servers) }, enabled = servers.isNotEmpty()) { Text("ПРОВЕРИТЬ ВСЕ") }
+                            OutlinedButton(onClick = { tab = 1 }) { Text("К СТРАНАМ") }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        Text("Последние результаты: ${pingResults.size} доступно • ${failedPings.size} без ответа", color = Color.LightGray, fontSize = 12.sp)
+                    }
+                    1 -> {
+                        Text("СТРАНЫ", color = Color.White, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = country == "Все страны", onClick = { country = "Все страны" }, label = { Text("Все ${servers.size}") })
+                            OutlinedButton(onClick = { pingAll(servers.filter { country == "Все страны" || it.country == country }) }) { Text("Пинг страны") }
+                        }
+                        LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            items(countries, key = { it }) { item ->
+                                val count = servers.count { it.country == item }
+                                val best = servers.filter { it.country == item && pingResults.containsKey(it.key) }.minOfOrNull { pingResults[it.key]!! }
+                                Card(onClick = { country = item }, colors = CardDefaults.cardColors(containerColor = if (country == item) Color(0xFF24503F) else Color(0xFF172338))) {
+                                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(item, color = Color.White, modifier = Modifier.weight(1f), fontWeight = FontWeight.Bold)
+                                        Text("${best?.let { "${it} мс" } ?: "пинг не проверен"}  •  $count", color = Color.LightGray, fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                            item {
+                                Spacer(Modifier.height(6.dp))
+                                OutlinedTextField(value = search, onValueChange = { search = it }, label = { Text("Поиск сервера") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                                Text(if (country == "Все страны") "ВСЕ СЕРВЕРЫ" else country, color = green, fontWeight = FontWeight.Bold)
+                            }
+                            items(visible, key = { it.key }) { item ->
+                                ServerCard(item, pingResults[item.key], item.key in pinging, selected == item.rawLink,
+                                    { selected = item.rawLink; message = "Выбран ${item.name}" },
+                                    { pingServer(item) }, { selected = item.rawLink; onConnect(item.rawLink) })
                             }
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shape = RoundedCornerShape(14.dp)
-                ) {
-                    Text("СОХРАНИТЬ НАСТРОЙКИ")
+                    }
+                    else -> {
+                        Text("ПОДПИСКА И ИМПОРТ", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Можно вставить несколько ссылок на подписки, каждую с новой строки. Поддерживается обычный текст и Base64.", color = Color.LightGray, fontSize = 12.sp)
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedTextField(value = subscription, onValueChange = { subscription = it }, label = { Text("URL подписки (каждая с новой строки)") },
+                            modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 5)
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = {
+                            val urls = subscription.lines().map { it.trim() }.filter { it.startsWith("http://") || it.startsWith("https://") }
+                            if (urls.isEmpty()) {
+                                val parsed = parseVless(decodeSubscription(subscription))
+                                servers = parsed
+                                message = "Импортировано серверов: ${parsed.size}"
+                                onSaveSubscription(subscription)
+                            } else {
+                                loading = true
+                                onSaveSubscription(subscription)
+                                executor.execute {
+                                    val all = mutableListOf<VlessServer>()
+                                    val errors = mutableListOf<String>()
+                                    urls.forEach { address ->
+                                        try {
+                                            val conn = (URL(address).openConnection() as HttpURLConnection).apply {
+                                                connectTimeout = 12000
+                                                readTimeout = 18000
+                                                instanceFollowRedirects = true
+                                                setRequestProperty("User-Agent", "FreedomTunnel/1.0")
+                                            }
+                                            val body = try { conn.inputStream.bufferedReader().use { it.readText() } }
+                                                finally { conn.disconnect() }
+                                            all += parseVless(decodeSubscription(body))
+                                        } catch (e: Exception) { errors += "${address.take(35)}: ${e.message ?: "ошибка"}" }
+                                    }
+                                    val result = all.distinctBy { it.key + it.uuid }
+                                    servers = result
+                                    pingResults = emptyMap()
+                                    failedPings = emptySet()
+                                    selected = ""
+                                    loading = false
+                                    message = "Загружено: ${result.size} серверов из ${urls.size} подписок" +
+                                        if (errors.isNotEmpty()) " • ошибок: ${errors.size}" else ""
+                                    tab = 1
+                                }
+                            }
+                        }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text(if (loading) "ЗАГРУЖАЕМ..." else "ЗАГРУЗИТЬ / ОБНОВИТЬ") }
+                        Spacer(Modifier.height(8.dp))
+                        OutlinedButton(onClick = { pingAll(servers) }, enabled = servers.isNotEmpty(), modifier = Modifier.fillMaxWidth()) { Text("ПРОВЕРИТЬ ПИНГ ВСЕХ СЕРВЕРОВ") }
+                        Text("Сейчас в списке: ${servers.size}. Серверы сохраняются до следующей загрузки подписки.", color = Color.LightGray, fontSize = 12.sp)
+                    }
                 }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Text(
-                    "FREEDOM TUNNEL • версия 0.3",
-                    color = Color(0xFF718096),
-                    fontSize = 11.sp
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
             }
         }
     }
 }
 
+@Composable
+private fun ServerCard(
+    server: VlessServer,
+    ping: Long?,
+    isPinging: Boolean,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onPing: () -> Unit,
+    onConnect: () -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = if (selected) Color(0xFF24503F) else Color(0xFF172338)),
+        shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+        Column(Modifier.fillMaxWidth().padding(11.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(server.name, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(ping?.let { "${it} мс" } ?: if (isPinging) "проверка…" else "—", color = if (ping != null) Color(0xFF56D6A0) else Color.LightGray, fontSize = 12.sp)
+            }
+            Text("${server.host}:${server.port} • ${server.security.uppercase()} • ${server.network.uppercase()}", color = Color.LightGray, fontSize = 11.sp)
+            Spacer(Modifier.height(7.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedButton(onClick = onPing, enabled = !isPinging, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 5.dp)) {
+                    Text(if (isPinging) "ПИНГУЕМ" else "ПИНГ", fontSize = 11.sp)
+                }
+                OutlinedButton(onClick = onSelect, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 5.dp)) { Text(if (selected) "ВЫБРАН" else "ВЫБРАТЬ", fontSize = 11.sp) }
+                Button(onClick = onConnect, modifier = Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 5.dp)) { Text("СТАРТ", fontSize = 11.sp) }
+            }
+        }
+    }
+}
