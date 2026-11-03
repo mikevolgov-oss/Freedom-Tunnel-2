@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
                 serviceStatus = statusState.value,
                 onConnect = ::connect,
                 onDisconnect = { stopService(Intent(this, FreedomVpnService::class.java)) },
-                savedSubscription = prefs.getString("subscription", "https://radarhub.top/by-protocol/vless.txt").orEmpty(),
+                savedSubscription = prefs.getString("subscription", "https://raw.githubusercontent.com/CaptchaQ/vless-servers/main/working_lite.txt").orEmpty(),
                 onSaveSubscription = { prefs.edit().putString("subscription", it).apply() },
                 savedServers = prefs.getString("servers_cache", "").orEmpty(),
                 onSaveServers = { prefs.edit().putString("servers_cache", it).apply() }
@@ -178,6 +178,9 @@ private fun parseVless(text: String): List<VlessServer> {
             val host = uri.host ?: return@mapNotNull null
             val port = uri.port
             val uuid = uri.userInfo ?: return@mapNotNull null
+            val transport = (uri.getQueryParameter("type") ?: "tcp").lowercase(Locale.ROOT)
+            if (host == "0.0.0.0" || host == "127.0.0.1" || uuid == "00000000-0000-0000-0000-000000000000") return@mapNotNull null
+            if (transport !in setOf("tcp", "raw", "ws", "grpc", "httpupgrade")) return@mapNotNull null
             if (port !in 1..65535) return@mapNotNull null
             val label = Uri.decode(uri.fragment ?: "").ifBlank { host }
             VlessServer(
