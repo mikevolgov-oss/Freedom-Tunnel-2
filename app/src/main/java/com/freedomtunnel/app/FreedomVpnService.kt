@@ -263,6 +263,9 @@ class FreedomVpnService : VpnService() {
             .addAddress("10.77.0.1", 30)
             .addAddress("fd77:7777:7777::1", 126)
             .addDnsServer("1.1.1.1")
+            // The native CSQTT process runs under this app UID. Excluding our
+            // package prevents its peer/relay sockets from looping back into TUN.
+            .addDisallowedApplication(packageName)
             .addRoute("0.0.0.0", 0)
             .addRoute("::", 0)
             .establish() ?: error("Android не выдал TUN-интерфейс для CSQTT")
