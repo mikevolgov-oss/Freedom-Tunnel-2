@@ -9,6 +9,8 @@ import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -211,6 +213,7 @@ fun FreedomTunnelScreen(
     var loading by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("Добавьте ссылку на подписку и загрузите серверы") }
     val executor = remember { Executors.newFixedThreadPool(8) }
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val green = Color(0xFF56D6A0)
     val bg = Color(0xFF0B1220)
 
@@ -224,9 +227,11 @@ fun FreedomTunnelScreen(
                 true
             } catch (_: Exception) { false }
             val ms = (System.nanoTime() - start) / 1_000_000
-            pinging = pinging - server.key
-            if (success) pingResults = pingResults + (server.key to ms)
-            else failedPings = failedPings + server.key
+            mainHandler.post {
+                pinging = pinging - server.key
+                if (success) pingResults = pingResults + (server.key to ms)
+                else failedPings = failedPings + server.key
+            }
         }
     }
 
@@ -361,14 +366,16 @@ fun FreedomTunnelScreen(
                                         } catch (e: Exception) { errors += "${address.take(35)}: ${e.message ?: "ошибка"}" }
                                     }
                                     val result = all.distinctBy { it.key + it.uuid }
-                                    servers = result
-                                    pingResults = emptyMap()
-                                    failedPings = emptySet()
-                                    selected = ""
-                                    loading = false
-                                    message = "Загружено: ${result.size} серверов из ${urls.size} подписок" +
-                                        if (errors.isNotEmpty()) " • ошибок: ${errors.size}" else ""
-                                    tab = 1
+                                    mainHandler.post {
+                                        servers = result
+                                        pingResults = emptyMap()
+                                        failedPings = emptySet()
+                                        selected = ""
+                                        loading = false
+                                        message = "Загружено: ${result.size} серверов из ${urls.size} подписок" +
+                                            if (errors.isNotEmpty()) " • ошибок: ${errors.size}" else ""
+                                        tab = 1
+                                    }
                                 }
                             }
                         }, enabled = !loading, modifier = Modifier.fillMaxWidth()) { Text(if (loading) "ЗАГРУЖАЕМ..." else "ЗАГРУЗИТЬ / ОБНОВИТЬ") }
