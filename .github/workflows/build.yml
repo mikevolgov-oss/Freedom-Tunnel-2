@@ -51,6 +51,7 @@ jobs:
           mkdir -p ../../app/src/main/jniLibs/arm64-v8a
           cp target/aarch64-linux-android/release/client ../../app/src/main/jniLibs/arm64-v8a/libclient.so
           chmod 755 ../../app/src/main/jniLibs/arm64-v8a/libclient.so
+          mkdir -p ../../app/src/main/assets
           cp ../LICENSE ../../app/src/main/assets/csqtt-LICENSE.txt
 
       - name: Set up Gradle
