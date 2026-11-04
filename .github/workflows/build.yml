@@ -36,12 +36,10 @@ jobs:
       - name: Install cargo-ndk
         run: cargo install cargo-ndk --locked
 
-      - name: Fetch pinned CSQTT source
-        run: git clone --depth 1 --branch v2.5.0 https://github.com/amurcanov/csqtt.git csqtt-upstream
-
-      - name: Prepare CSQTT build resources
-        working-directory: csqtt-upstream
-        run: cp app/src/main/assets/domains.txt domains.txt
+      - name: Fetch CSQTT 2.5.3 compatible source
+        run: |
+          git clone --depth 1 https://github.com/Afteroid/csqttr.git csqtt-upstream
+          git -C csqtt-upstream checkout 001caa48e342caac8758db8ed4d12305faea6954
 
       - name: Build CSQTT Android ARM64 client
         working-directory: csqtt-upstream/rust-client
