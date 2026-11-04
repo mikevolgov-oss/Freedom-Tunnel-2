@@ -61,7 +61,7 @@ class FreedomVpnService : VpnService() {
         }
         val engine = intent?.getStringExtra(EXTRA_ENGINE) ?: "vless"
         if (engine == "csqtt") {
-            val profile = intent.getStringExtra(EXTRA_CSQTT_PROFILE)
+            val profile = intent?.getStringExtra(EXTRA_CSQTT_PROFILE)
             if (profile.isNullOrBlank()) {
                 publishStatus("Ошибка: профиль CSQTT пустой")
                 stopSelf()
