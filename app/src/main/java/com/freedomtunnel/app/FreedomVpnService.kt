@@ -225,12 +225,12 @@ class FreedomVpnService : VpnService() {
         check(binary.isFile && binary.canExecute()) { "Нативный клиент CSQTT не найден: ${binary.absolutePath}" }
 
         val command = mutableListOf(
-            binary.absolutePath, "-peer", if (host.contains(":")) "[$host]:$port" else "$host:$port",
-            "-n", "10", "-listen", "127.0.0.1:0", "-tun-uds", "csqtt_tun_uds",
-            "-vk-hash-mode", if (hashList.isEmpty()) "auto_js" else "manual",
-            "-fingerprint", "firefox", "-client-ids", "8202606,6287487",
-            "-obfs", "unified", "-turn-transport", "udp", "-srtp-mode", "auto",
-            "-vk-auth-mode", "vkcalls", "-captcha-mode", "auto"
+            binary.absolutePath, "--peer", if (host.contains(":")) "[$host]:$port" else "$host:$port",
+            "--workers", "10", "--listen", "127.0.0.1:0", "--tun-uds", "csqtt_tun_uds",
+            "--vk-hash-mode", if (hashList.isEmpty()) "auto_js" else "manual",
+            "--fingerprint", "firefox", "--client-ids", "8202606,6287487",
+            "--obfs", "unified", "--turn-transport", "udp", "--srtp-mode", "auto",
+            "--vk-auth-mode", "vkcalls", "--captcha-mode", "auto"
         )
         if (hashList.isNotEmpty()) { command += "-vk"; command += hashList.joinToString(",") }
         val builder = ProcessBuilder(command).apply {
