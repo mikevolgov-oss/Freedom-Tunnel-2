@@ -271,16 +271,25 @@ class FreedomVpnService : VpnService() {
                     }
                     // Upstream emits tunnel configuration inside its structured CONFIG event.
                     // Also accept a raw TUNCONF line for compatibility with older client builds.
-                    val configLine = when {
-                        line.startsWith("TUNCONF:") -> line
-                        line.startsWith("__CSQTT_EVENT__|CONFIG|") -> runCatching {
-                            JSONObject(line.substringAfter("__CSQTT_EVENT__|CONFIG|"))
-                                .optString("config")
-                        }.getOrDefault("")
-                        else -> ""
-                    }
-                    if (configLine.startsWith("TUNCONF:")) {
-                        val fields = configLine.removePrefix("TUNCONF:").split(":", limit = 5)
+                    // Native builds may prefix structured events with whitespace or log framing.
+                    // Normalize the line and search for the event marker instead of requiring offset 0.
+                    val normalizedLine = line.trim().removePrefix("\uFEFF").trim()
+                    val eventMarker = "__CSQTT_EVENT__|CONFIG|"
+                    val configLine = runCatching {
+                        when {
+                            normalizedLine.startsWith("TUNCONF:") -> normalizedLine
+                            normalizedLine.contains(eventMarker) -> JSONObject(
+                                normalizedLine.substringAfter(eventMarker)
+                            ).optString("config")
+                            else -> ""
+                        }.trim()
+                    }.onFailure {
+                        writeDiagnostic("CSQTT CONFIG: JSON parse failed: ${it.javaClass.simpleName}: ${it.message}")
+                    }.getOrDefault("")
+                    if (configLine.contains("TUNCONF:")) {
+                        val tunconf = configLine.substring(configLine.indexOf("TUNCONF:")).trim()
+                        writeDiagnostic("CSQTT CONFIG: TUNCONF найден, длина=${tunconf.length}")
+                        val fields = tunconf.removePrefix("TUNCONF:").split(":", limit = 5)
                         val clientIp = fields.getOrNull(0)?.trim().orEmpty()
                         val dnsServers = fields.getOrNull(1).orEmpty()
                             .split(",", ";", " ")
@@ -296,11 +305,14 @@ class FreedomVpnService : VpnService() {
                                     address.matches(Regex("""[0-9]{1,3}(\.[0-9]{1,3}){3}"""))
                             }.getOrDefault(false)
                         }
+                        writeDiagnostic("CSQTT CONFIG: ip=$clientIp validIp=$validIp dns=${dnsServers.joinToString(",")} validDns=${validDns.joinToString(",")}")
                         if (validIp && validDns.isNotEmpty()) {
                             tunConfig.set(clientIp to validDns)
+                            val released = tunConfigReady.count
                             tunConfigReady.countDown()
+                            writeDiagnostic("CSQTT CONFIG: latch released (before=$released)")
                         } else {
-                            writeDiagnostic("CSQTT: некорректный TUNCONF от сервера")
+                            writeDiagnostic("CSQTT CONFIG: TUNCONF rejected by validation")
                         }
                     }
                 }
@@ -310,11 +322,14 @@ class FreedomVpnService : VpnService() {
             }
         }.apply { isDaemon = true; start() }
 
+        writeDiagnostic("CSQTT CONFIG: waiting for TUNCONF latch")
         if (!tunConfigReady.await(30, TimeUnit.SECONDS)) {
             val tail = nativeOutputTail.joinToString(" | ")
+            writeDiagnostic("CSQTT CONFIG: await timed out; tail=$tail")
             process.destroy()
             error("CSQTT не прислал TUNCONF за 30 секунд. Вывод клиента: ${tail.ifBlank { "пусто" }}")
         }
+        writeDiagnostic("CSQTT CONFIG: await released; configPresent=${tunConfig.get() != null}")
         val (clientIp, dnsServers) = tunConfig.get()
             ?: run {
                 val tail = nativeOutputTail.joinToString(" | ")
