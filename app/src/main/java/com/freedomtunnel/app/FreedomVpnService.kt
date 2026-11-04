@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Intent
 import android.net.VpnService
+import android.net.TrafficStats
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.LocalSocket
@@ -50,6 +51,7 @@ class FreedomVpnService : VpnService() {
     private var commandServer: CommandServer? = null
     private var tunFd: android.os.ParcelFileDescriptor? = null
     @Volatile private var csqttProcess: Process? = null
+    @Volatile private var metricsRunning = false
 
     override fun onCreate() {
         super.onCreate()
@@ -359,7 +361,8 @@ class FreedomVpnService : VpnService() {
             if (attempt < 60) Thread.sleep(500)
         }
         check(delivered) { "Не удалось передать TUN клиенту CSQTT: ${lastError?.message ?: "тайм-аут"}" }
-        publishStatus("CSQTT: TUN передан нативному клиенту, соединение устанавливается")
+        publishStatus("CONNECTED: CSQTT туннель поднят")
+        startTrafficMetrics()
         Thread {
             val code = runCatching { process.waitFor() }.getOrDefault(-1)
             if (csqttProcess === process) {
@@ -486,6 +489,8 @@ class FreedomVpnService : VpnService() {
         val descriptor = builder.establish()
             ?: error("Android не выдал VPN-интерфейс")
         tunFd = descriptor
+        publishStatus("CONNECTED: VPN-интерфейс создан")
+        startTrafficMetrics()
         return descriptor.fd
     }
 
@@ -522,7 +527,33 @@ class FreedomVpnService : VpnService() {
         }
     }
 
+    private fun startTrafficMetrics() {
+        if (metricsRunning) return
+        metricsRunning = true
+        Thread {
+            var previousRx = TrafficStats.getUidRxBytes(android.os.Process.myUid()).coerceAtLeast(0L)
+            var previousTx = TrafficStats.getUidTxBytes(android.os.Process.myUid()).coerceAtLeast(0L)
+            var previousTime = System.currentTimeMillis()
+            while (metricsRunning) {
+                try { Thread.sleep(1000) } catch (_: InterruptedException) { break }
+                if (!metricsRunning) break
+                val rx = TrafficStats.getUidRxBytes(android.os.Process.myUid()).coerceAtLeast(previousRx)
+                val tx = TrafficStats.getUidTxBytes(android.os.Process.myUid()).coerceAtLeast(previousTx)
+                val now = System.currentTimeMillis()
+                val seconds = ((now - previousTime).coerceAtLeast(1L)) / 1000.0
+                val intent = Intent(ACTION_STATUS).setPackage(packageName)
+                    .putExtra(EXTRA_STATUS, "CONNECTED")
+                    .putExtra("rx_bytes", rx).putExtra("tx_bytes", tx)
+                    .putExtra("rx_speed", ((rx - previousRx) / seconds).toLong())
+                    .putExtra("tx_speed", ((tx - previousTx) / seconds).toLong())
+                sendBroadcast(intent)
+                previousRx = rx; previousTx = tx; previousTime = now
+            }
+        }.apply { isDaemon = true; start() }
+    }
+
     private fun stopTunnel() {
+        metricsRunning = false
         runCatching { csqttProcess?.destroy() }
         csqttProcess = null
         runCatching { commandServer?.closeService() }
