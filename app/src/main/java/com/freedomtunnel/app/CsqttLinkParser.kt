@@ -63,9 +63,17 @@ object CsqttLinkParser {
     }
 
     private fun decrypt(payload: String): String? = runCatching {
-        val normalized = payload.replace('-', '+').replace('_', '/')
-        val padded = normalized + "=".repeat((4 - normalized.length % 4) % 4)
-        val bytes = Base64.decode(padded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+        // Keep the URL-safe alphabet intact. Converting '-'/'_' to '+'/'/' and then
+        // asking Android's URL_SAFE decoder to decode it is inconsistent across
+        // Android Base64 implementations and can reject valid CSQTT share links.
+        val compact = payload.filterNot { it.isWhitespace() }
+        require(compact.isNotEmpty() && compact.length % 4 != 1)
+        val padded = compact + "=".repeat((4 - compact.length % 4) % 4)
+        val bytes = runCatching {
+            Base64.decode(padded, Base64.URL_SAFE or Base64.NO_WRAP)
+        }.getOrElse {
+            Base64.decode(padded, Base64.DEFAULT)
+        }
         require(bytes.size >= 28)
         val key = MessageDigest.getInstance("SHA-256").digest(KEY_SEED.toByteArray(Charsets.UTF_8))
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
