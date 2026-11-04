@@ -147,7 +147,7 @@ class MainActivity : ComponentActivity() {
                 serviceStatus = statusState.value,
                 onConnect = ::connect,
                 onConnectCsqtt = ::connectCsqtt,
-                onDisconnect = { stopService(Intent(this, FreedomVpnService::class.java)) },
+                onDisconnect = { startService(Intent(this, FreedomVpnService::class.java).setAction(FreedomVpnService.ACTION_STOP)) },
                 savedSubscription = prefs.getString("subscription", "https://raw.githubusercontent.com/CaptchaQ/vless-servers/main/working_lite.txt").orEmpty(),
                 onSaveSubscription = { prefs.edit().putString("subscription", it).apply() },
                 savedServers = prefs.getString("servers_cache", "").orEmpty(),
