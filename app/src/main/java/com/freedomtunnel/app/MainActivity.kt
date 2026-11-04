@@ -388,7 +388,7 @@ fun FreedomTunnelScreen(
                                 OutlinedTextField(value = search, onValueChange = { search = it }, label = { Text("Поиск сервера") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                                 Text(if (country == "Все страны") "ВСЕ СЕРВЕРЫ" else country, color = green, fontWeight = FontWeight.Bold)
                             }
-                            items(visible, key = { it.key }) { item ->
+                            items(visible, key = { it.rawLink }) { item ->
                                 ServerCard(item, pingResults[item.key], item.key in pinging, selected == item.rawLink,
                                     { selected = item.rawLink; message = "Выбран ${item.name}" },
                                     { pingServer(item) }, { selected = item.rawLink; onConnect(item.rawLink) })
