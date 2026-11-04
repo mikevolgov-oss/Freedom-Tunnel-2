@@ -38,13 +38,13 @@ jobs:
 
       - name: Fetch CSQTT 2.5.3 compatible source
         run: |
-          git clone --depth 1 https://github.com/Afteroid/csqttr.git csqtt-upstream
+          git clone https://github.com/Afteroid/csqttr.git csqtt-upstream
           git -C csqtt-upstream checkout 001caa48e342caac8758db8ed4d12305faea6954
 
       - name: Build CSQTT Android ARM64 client
         working-directory: csqtt-upstream/rust-client
         run: |
-          export ANDROID_NDK_HOME="${ANDROID_NDK_ROOT:-$ANDROID_HOME/ndk/27.3.13750724}"
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
           cargo ndk -t arm64-v8a --platform 24 build --release
           mkdir -p ../../app/src/main/jniLibs/arm64-v8a
           cp target/aarch64-linux-android/release/client ../../app/src/main/jniLibs/arm64-v8a/libclient.so
