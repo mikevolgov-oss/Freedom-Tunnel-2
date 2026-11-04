@@ -3,6 +3,9 @@ package com.freedomtunnel.app
 import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.ClipboardManager
+import android.content.ClipData
+import android.widget.Toast
 import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
@@ -28,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.io.File
 import java.net.HttpURLConnection
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -145,7 +149,13 @@ class MainActivity : ComponentActivity() {
                 savedSubscription = prefs.getString("subscription", "https://raw.githubusercontent.com/CaptchaQ/vless-servers/main/working_lite.txt").orEmpty(),
                 onSaveSubscription = { prefs.edit().putString("subscription", it).apply() },
                 savedServers = prefs.getString("servers_cache", "").orEmpty(),
-                onSaveServers = { prefs.edit().putString("servers_cache", it).apply() }
+                onSaveServers = { prefs.edit().putString("servers_cache", it).apply() },
+                onCopyDiagnostics = {
+                    val log = runCatching { File(filesDir, "last_vpn_error.txt").readText() }.getOrDefault("Журнал пока пуст")
+                    val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("Freedom Tunnel diagnostics", log))
+                    Toast.makeText(this, "Журнал скопирован. Вставь его сюда.", Toast.LENGTH_LONG).show()
+                }
             )
         }
     }
@@ -242,7 +252,8 @@ fun FreedomTunnelScreen(
     savedSubscription: String,
     onSaveSubscription: (String) -> Unit,
     savedServers: String,
-    onSaveServers: (String) -> Unit
+    onSaveServers: (String) -> Unit,
+    onCopyDiagnostics: () -> Unit
 ) {
     var subscription by remember { mutableStateOf(savedSubscription) }
     var csqttLink by remember { mutableStateOf("") }
@@ -340,6 +351,7 @@ fun FreedomTunnelScreen(
                         Text(if (selected.isBlank()) "Сервер не выбран" else "Выбран: ${servers.firstOrNull { it.rawLink == selected }?.name ?: "сервер"}",
                             color = Color.White, fontWeight = FontWeight.Bold)
                         Text(serviceStatus.ifBlank { message }, color = Color(0xFFFFC66D), fontSize = 12.sp)
+                        TextButton(onClick = onCopyDiagnostics, modifier = Modifier.fillMaxWidth()) { Text("СКОПИРОВАТЬ ЖУРНАЛ ДИАГНОСТИКИ") }
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(onClick = { if (selected.isNotBlank()) onConnect(selected) else message = "Сначала выберите сервер" },
