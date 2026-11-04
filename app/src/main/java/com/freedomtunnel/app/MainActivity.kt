@@ -61,10 +61,25 @@ class MainActivity : ComponentActivity() {
     private var pendingEngine = "vless"
     private var pendingCsqttProfile = ""
     private val statusState = mutableStateOf("")
+    private val rxBytesState = mutableLongStateOf(0L)
+    private val txBytesState = mutableLongStateOf(0L)
+    private val rxSpeedState = mutableLongStateOf(0L)
+    private val txSpeedState = mutableLongStateOf(0L)
     private val vpnRequestCode = 410
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-            statusState.value = intent?.getStringExtra(FreedomVpnService.EXTRA_STATUS).orEmpty()
+            val status = intent?.getStringExtra(FreedomVpnService.EXTRA_STATUS).orEmpty()
+            statusState.value = status
+            if (intent?.hasExtra("rx_bytes") == true) {
+                rxBytesState.longValue = intent.getLongExtra("rx_bytes", 0L)
+                txBytesState.longValue = intent.getLongExtra("tx_bytes", 0L)
+                rxSpeedState.longValue = intent.getLongExtra("rx_speed", 0L)
+                txSpeedState.longValue = intent.getLongExtra("tx_speed", 0L)
+            }
+            if (status.contains("остановлен", true) || status.contains("Ошибка", true)) {
+                rxBytesState.longValue = 0L; txBytesState.longValue = 0L
+                rxSpeedState.longValue = 0L; txSpeedState.longValue = 0L
+            }
         }
     }
 
@@ -145,6 +160,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             FreedomTunnelScreen(
                 serviceStatus = statusState.value,
+                rxBytes = rxBytesState.longValue,
+                txBytes = txBytesState.longValue,
+                rxSpeed = rxSpeedState.longValue,
+                txSpeed = txSpeedState.longValue,
                 onConnect = ::connect,
                 onConnectCsqtt = ::connectCsqtt,
                 onDisconnect = { startService(Intent(this, FreedomVpnService::class.java).setAction(FreedomVpnService.ACTION_STOP)) },
@@ -248,6 +267,10 @@ private fun parseVless(text: String): List<VlessServer> {
 @Composable
 fun FreedomTunnelScreen(
     serviceStatus: String,
+    rxBytes: Long,
+    txBytes: Long,
+    rxSpeed: Long,
+    txSpeed: Long,
     onConnect: (String) -> Unit,
     onConnectCsqtt: (String) -> Unit,
     onDisconnect: () -> Unit,
@@ -356,7 +379,13 @@ fun FreedomTunnelScreen(
                     Column(Modifier.fillMaxWidth().padding(12.dp)) {
                         Text(if (selected.isBlank()) "Сервер не выбран" else "Выбран: ${servers.firstOrNull { it.rawLink == selected }?.name ?: "сервер"}",
                             color = Color.White, fontWeight = FontWeight.Bold)
-                        Text(serviceStatus.ifBlank { message }, color = Color(0xFFFFC66D), fontSize = 12.sp)
+                        val connected = serviceStatus.startsWith("CONNECTED")
+                        Text(if (connected) "● ПОДКЛЮЧЕНО" else serviceStatus.ifBlank { message },
+                            color = if (connected) Color(0xFF56D6A0) else Color(0xFFFFC66D), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        if (connected) {
+                            Text("↓ ${formatBytes(rxBytes)}   ↑ ${formatBytes(txBytes)}", color = Color.White, fontSize = 13.sp)
+                            Text("Скорость: ↓ ${formatRate(rxSpeed)}   ↑ ${formatRate(txSpeed)}", color = Color(0xFF56D6A0), fontSize = 12.sp)
+                        }
                         TextButton(onClick = onCopyDiagnostics, modifier = Modifier.fillMaxWidth()) { Text("СКОПИРОВАТЬ ЖУРНАЛ ДИАГНОСТИКИ") }
                         Spacer(Modifier.height(8.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -504,3 +533,12 @@ private fun ServerCard(
         }
     }
 }
+
+private fun formatBytes(value: Long): String {
+    val units = listOf("Б", "КБ", "МБ", "ГБ")
+    var amount = value.coerceAtLeast(0L).toDouble()
+    var index = 0
+    while (amount >= 1024 && index < units.lastIndex) { amount /= 1024; index++ }
+    return String.format(Locale.getDefault(), "%.1f %s", amount, units[index])
+}
+private fun formatRate(value: Long): String = formatBytes(value) + "/с"
