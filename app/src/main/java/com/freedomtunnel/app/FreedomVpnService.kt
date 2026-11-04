@@ -29,6 +29,9 @@ import io.nekohasekai.libbox.TunOptions
 import java.lang.reflect.Proxy
 import org.json.JSONObject
 import java.io.File
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 class FreedomVpnService : VpnService() {
     companion object {
@@ -248,27 +251,80 @@ class FreedomVpnService : VpnService() {
             process.outputStream.write("VK_JS_BOOTSTRAP:$encoded\n".toByteArray(Charsets.UTF_8))
             process.outputStream.flush()
         }
+        // The CSQTT server assigns the virtual client address and DNS at runtime.
+        // The original CSQTT Android client waits for TUNCONF before creating Android's
+        // VPN interface. A made-up static address here can pass the FD handshake while
+        // leaving the tunnel unusable (VPN icon appears, but no traffic is routed).
+        val tunConfigReady = CountDownLatch(1)
+        val tunConfig = AtomicReference<Pair<String, List<String>>?>(null)
+        val nativeOutputTail = java.util.concurrent.ConcurrentLinkedDeque<String>()
         Thread {
             runCatching {
                 process.inputStream.bufferedReader().forEachLine { line ->
                     Log.i(TAG, "CSQTT: $line")
-                    if (line.isNotBlank()) writeDiagnostic("CSQTT: ${line.take(500)}")
+                    if (line.isNotBlank()) {
+                        writeDiagnostic("CSQTT: ${line.take(500)}")
+                        nativeOutputTail.addLast(line.take(500))
+                        while (nativeOutputTail.size > 40) nativeOutputTail.pollFirst()
+                    }
+                    if (line.startsWith("TUNCONF:")) {
+                        val fields = line.removePrefix("TUNCONF:").split(":", limit = 5)
+                        val clientIp = fields.getOrNull(0)?.trim().orEmpty()
+                        val dnsServers = fields.getOrNull(1).orEmpty()
+                            .split(",", ";", " ")
+                            .map { it.trim() }
+                            .filter { it.isNotEmpty() }
+                        val validIp = runCatching {
+                            java.net.InetAddress.getByName(clientIp) is java.net.Inet4Address &&
+                                clientIp.matches(Regex("""[0-9]{1,3}(\\.[0-9]{1,3}){3}"""))
+                        }.getOrDefault(false)
+                        val validDns = dnsServers.filter { address ->
+                            runCatching {
+                                java.net.InetAddress.getByName(address) is java.net.Inet4Address &&
+                                    address.matches(Regex("""[0-9]{1,3}(\\.[0-9]{1,3}){3}"""))
+                            }.getOrDefault(false)
+                        }
+                        if (validIp && validDns.isNotEmpty()) {
+                            tunConfig.set(clientIp to validDns)
+                            tunConfigReady.countDown()
+                        } else {
+                            writeDiagnostic("CSQTT: некорректный TUNCONF от сервера")
+                        }
+                    }
                 }
+            }.onFailure {
+                writeDiagnostic("CSQTT: ошибка чтения вывода: ${it.message}")
+                tunConfigReady.countDown()
             }
         }.apply { isDaemon = true; start() }
 
-        val descriptor = Builder()
+        if (!tunConfigReady.await(30, TimeUnit.SECONDS)) {
+            val tail = nativeOutputTail.joinToString(" | ")
+            process.destroy()
+            error("CSQTT не прислал TUNCONF за 30 секунд. Вывод клиента: ${tail.ifBlank { "пусто" }}")
+        }
+        val (clientIp, dnsServers) = tunConfig.get()
+            ?: run {
+                val tail = nativeOutputTail.joinToString(" | ")
+                process.destroy()
+                error("CSQTT завершился без корректной настройки TUN. Вывод: ${tail.ifBlank { "пусто" }}")
+            }
+
+        val vpnBuilder = Builder()
             .setSession("Freedom Tunnel CSQTT")
             .setMtu(1500)
-            .addAddress("10.77.0.1", 30)
-            .addAddress("fd77:7777:7777::1", 126)
-            .addDnsServer("1.1.1.1")
+            .addAddress(clientIp, 32)
+            // Match the upstream CSQTT client: IPv4 default route and server-provided DNS.
+            .addRoute("0.0.0.0", 0)
             // The native CSQTT process runs under this app UID. Excluding our
             // package prevents its peer/relay sockets from looping back into TUN.
             .addDisallowedApplication(packageName)
-            .addRoute("0.0.0.0", 0)
-            .addRoute("::", 0)
-            .establish() ?: error("Android не выдал TUN-интерфейс для CSQTT")
+        dnsServers.forEach { dns ->
+            vpnBuilder.addDnsServer(dns)
+            runCatching { vpnBuilder.addRoute(dns, 32) }
+        }
+        val descriptor = vpnBuilder.establish()
+            ?: error("Android не выдал TUN-интерфейс для CSQTT")
         tunFd = descriptor
 
         var delivered = false
