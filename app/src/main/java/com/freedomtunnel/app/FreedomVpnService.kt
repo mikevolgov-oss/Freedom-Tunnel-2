@@ -276,12 +276,12 @@ class FreedomVpnService : VpnService() {
                             .filter { it.isNotEmpty() }
                         val validIp = runCatching {
                             java.net.InetAddress.getByName(clientIp) is java.net.Inet4Address &&
-                                clientIp.matches(Regex("""[0-9]{1,3}(\\.[0-9]{1,3}){3}"""))
+                                clientIp.matches(Regex("""[0-9]{1,3}(\.[0-9]{1,3}){3}"""))
                         }.getOrDefault(false)
                         val validDns = dnsServers.filter { address ->
                             runCatching {
                                 java.net.InetAddress.getByName(address) is java.net.Inet4Address &&
-                                    address.matches(Regex("""[0-9]{1,3}(\\.[0-9]{1,3}){3}"""))
+                                    address.matches(Regex("""[0-9]{1,3}(\.[0-9]{1,3}){3}"""))
                             }.getOrDefault(false)
                         }
                         if (validIp && validDns.isNotEmpty()) {
