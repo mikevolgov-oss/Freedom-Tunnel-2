@@ -267,8 +267,18 @@ class FreedomVpnService : VpnService() {
                         nativeOutputTail.addLast(line.take(500))
                         while (nativeOutputTail.size > 40) nativeOutputTail.pollFirst()
                     }
-                    if (line.startsWith("TUNCONF:")) {
-                        val fields = line.removePrefix("TUNCONF:").split(":", limit = 5)
+                    // Upstream emits tunnel configuration inside its structured CONFIG event.
+                    // Also accept a raw TUNCONF line for compatibility with older client builds.
+                    val configLine = when {
+                        line.startsWith("TUNCONF:") -> line
+                        line.startsWith("__CSQTT_EVENT__|CONFIG|") -> runCatching {
+                            JSONObject(line.substringAfter("__CSQTT_EVENT__|CONFIG|"))
+                                .optString("config")
+                        }.getOrDefault("")
+                        else -> ""
+                    }
+                    if (configLine.startsWith("TUNCONF:")) {
+                        val fields = configLine.removePrefix("TUNCONF:").split(":", limit = 5)
                         val clientIp = fields.getOrNull(0)?.trim().orEmpty()
                         val dnsServers = fields.getOrNull(1).orEmpty()
                             .split(",", ";", " ")
