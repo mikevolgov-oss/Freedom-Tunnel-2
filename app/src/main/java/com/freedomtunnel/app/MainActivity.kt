@@ -18,6 +18,8 @@ import android.util.Base64
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -271,6 +273,7 @@ fun FreedomTunnelScreen(
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     val green = Color(0xFF56D6A0)
     val bg = Color(0xFF0B1220)
+    val screenScrollState = rememberScrollState()
 
     fun pingServer(server: VlessServer) {
         if (server.key in pinging || pingResults.containsKey(server.key) || server.key in failedPings) return
@@ -318,7 +321,10 @@ fun FreedomTunnelScreen(
                 }
             }
         ) { padding ->
-            Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 10.dp)) {
+            Column(
+                Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp, vertical = 10.dp)
+                    .then(if (tab == 1) Modifier else Modifier.verticalScroll(screenScrollState))
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                     Column(Modifier.weight(1f)) {
                         Text("FREEDOM TUNNEL", color = green, fontSize = 22.sp, fontWeight = FontWeight.Black, letterSpacing = 1.5.sp)
